@@ -1,0 +1,629 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  backend
+  
+  Sample SAM Template for BikinAi.id backend
+
+Parameters:
+  EnvironmentSuffix:
+    Type: String
+    Description: 'Suffix penanda environment (contoh: -sbx)'
+    Default: '-sbx'
+  ApiStageName:
+    Type: String
+    Description: API Gateway stage name untuk environment
+    Default: 'sbx'
+  CognitoDomainPrefix:
+    Type: String
+    Description: Prefix domain Cognito bawaan Amazon (dipakai jika CognitoCustomDomainCertificateArn kosong)
+    Default: 'bikinai-auth-sbx-9021'
+  CognitoCustomDomainHostname:
+    Type: String
+    Description: Hostname custom Hosted UI (contoh auth.example.com), tanpa https://. Dipakai hanya jika CognitoCustomDomainCertificateArn diisi.
+    Default: ''
+  CognitoCustomDomainCertificateArn:
+    Type: String
+    Description: >
+      ARN sertifikat ACM (ISSUED) untuk hostname custom Hosted UI.
+      Untuk custom domain Cognito wajib di us-east-1 (N. Virginia) karena dipakai CloudFront;
+      User Pool boleh di region lain (mis. ap-southeast-1).
+      Kosongkan untuk memakai domain Cognito bawaan (CognitoDomainPrefix).
+    Default: ''
+  ProvisionCognitoUserPoolDomain:
+    Type: String
+    Description: >
+      Set false SEKALI untuk menghapus resource domain dari pool (diperlukan saat migrasi
+      domain Cognito bawaan ke custom domain, karena CloudFormation tidak bisa replace
+      UserPoolDomain dalam satu deploy). Setelah deploy sukses, set true lalu deploy lagi.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  FrontendCallbackUrl:
+    Type: String
+    Description: Frontend callback URL sesudah login Cognito
+    Default: 'http://localhost:3000/dashboard'
+  FrontendLogoutUrl:
+    Type: String
+    Description: Frontend URL sesudah logout Cognito
+    Default: 'http://localhost:3000/'
+  S3ResourceBucketName:
+    Type: String
+    Description: Nama bucket S3 untuk upload resource
+    Default: 'dapurartisan-sbx'
+  GoogleClientId:
+    Type: String
+    Description: Google OAuth Client ID for Cognito
+    Default: 'PLACEHOLDER_GOOGLE_CLIENT_ID'
+  GoogleClientSecret:
+    Type: String
+    Description: Google OAuth Client Secret for Cognito
+    Default: 'PLACEHOLDER_GOOGLE_CLIENT_SECRET'
+  MidtransApiUrl:
+    Type: String
+    Description: Midtrans API URL
+    Default: 'https://app.sandbox.midtrans.com/snap/v1/transactions'
+  MidtransFinishCallbackUrl:
+    Type: String
+    Description: Midtrans Snap finish callback URL
+    Default: 'https://bkn-ai-dashboard.vercel.app/confirmation-payment'
+  MidtransServerKey:
+    Type: String
+    Description: Midtrans Server Key
+    Default: 'PLACEHOLDER_MIDTRANS_SERVER_KEY'
+
+  # ─ Upstash Redis (untuk job queue) ──────────────────────────────
+  UpstashRedisRestUrl:
+    Type: String
+    Description: Upstash Redis REST URL
+    Default: 'PLACEHOLDER_UPSTASH_REDIS_REST_URL'
+  UpstashRedisRestToken:
+    Type: String
+    Description: Upstash Redis REST Token
+    Default: 'PLACEHOLDER_UPSTASH_REDIS_REST_TOKEN'
+
+  # ─ QStash (untuk trigger antar Lambda) ──────────────────────────
+  QStashToken:
+    Type: String
+    Description: Upstash QStash token
+    Default: 'PLACEHOLDER_QSTASH_TOKEN'
+  WorkerBQStashUrl:
+    Type: String
+    Description: URL publik Worker B yang akan dipanggil via QStash
+    Default: 'PLACEHOLDER_WORKER_B_QSTASH_URL'
+  WorkerCUrl:
+    Type: String
+    Description: URL publik Worker C (webhook yang diberikan ke RunPod/GCP)
+    Default: 'PLACEHOLDER_WORKER_C_URL'
+
+  # ─ RunPod / GCP executor ─────────────────────────────────────
+  RunPodApiKey:
+    Type: String
+    Description: RunPod API key
+    Default: 'PLACEHOLDER_RUNPOD_API_KEY'
+  RunPodEndpointId:
+    Type: String
+    Description: RunPod Serverless Endpoint ID
+    Default: 'PLACEHOLDER_RUNPOD_ENDPOINT_ID'
+  GcpWebhookUrl:
+    Type: String
+    Description: GCP Cloud Run URL sebagai alternatif RunPod
+    Default: ''
+  WorkerUrls:
+    Type: String
+    Description: Comma separated list of worker URLs
+    Default: ''
+  MaxActiveSlots:
+    Type: String
+    Description: Jumlah maksimum job yang berjalan paralel per Worker URL
+    Default: '2'
+
+Rules:
+  CognitoCustomDomainNeedsHostname:
+    RuleCondition: !Not [!Equals [!Ref CognitoCustomDomainCertificateArn, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CognitoCustomDomainHostname, '']]
+        AssertDescription: Isi CognitoCustomDomainHostname (FQDN tanpa https) bila CognitoCustomDomainCertificateArn diisi.
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+
+Conditions:
+  UseCognitoCustomDomain: !Not [!Equals [!Ref CognitoCustomDomainCertificateArn, '']]
+  CreateUserPoolDomain: !Equals [!Ref ProvisionCognitoUserPoolDomain, 'true']
+  IsDevEnvironment: !Not [!Equals [!Ref EnvironmentSuffix, '-prod']]
+
+Resources:
+  # DynamoDB Table for profile
+  ProfileTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'profile${EnvironmentSuffix}'
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: user_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: user_type
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # DynamoDB Table for topup credit history
+  TopupCreditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'topup_credit${EnvironmentSuffix}'
+      AttributeDefinitions:
+        - AttributeName: uuid
+          AttributeType: S
+        - AttributeName: user_email
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: uuid
+          KeyType: HASH
+        - AttributeName: user_email
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserEmailIndex
+          KeySchema:
+            - AttributeName: user_email
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # User AI resource requests (image/video); PK uuid, SK user_email
+  UserRequestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'user_request${EnvironmentSuffix}'
+      AttributeDefinitions:
+        - AttributeName: uuid
+          AttributeType: S
+        - AttributeName: user_email
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: uuid
+          KeyType: HASH
+        - AttributeName: user_email
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserEmailCreatedIndex
+          KeySchema:
+            - AttributeName: user_email
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # Harga kredit per jenis resource (PK key, SK charge). Backend membaca kredit dari:
+  #   atribut amount / credits, ATAU angka di SK/atribut charge (contoh charge "5").
+  # Kunci untuk POST /resource: TEXT-TO-IMAGE, IMAGE-TO-IMAGE, TEXT-TO-VIDEO, IMAGE-TO-VIDEO (+ resource_family).
+  PricingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'pricing${EnvironmentSuffix}'
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+        - AttributeName: charge
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+        - AttributeName: charge
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # DynamoDB Table for midtrans transaction notifications
+  TransactionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'transaction${EnvironmentSuffix}'
+      AttributeDefinitions:
+        - AttributeName: transaction_id
+          AttributeType: S
+        - AttributeName: transaction_status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: transaction_id
+          KeyType: HASH
+        - AttributeName: transaction_status
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # Cognito User Pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'BikinAiUserPool${EnvironmentSuffix}'
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Schema:
+        - Name: term_and_condition
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      LambdaConfig:
+        PostConfirmation: !GetAtt CognitoPostAuthTriggerFunction.Arn
+
+  # Cognito User Pool Domain (custom ACM hostname ATAU prefix domain bawaan Amazon).
+  # Condition CreateUserPoolDomain: migrasi prefix→custom butuh deploy dengan false dulu, lalu true.
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: CreateUserPoolDomain
+    Properties:
+      Domain: !If
+        - UseCognitoCustomDomain
+        - !Ref CognitoCustomDomainHostname
+        - !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+      CustomDomainConfig: !If
+        - UseCognitoCustomDomain
+        - CertificateArn: !Ref CognitoCustomDomainCertificateArn
+        - !Ref AWS::NoValue
+
+  # Google Identity Provider
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      ProviderName: Google
+      ProviderType: Google
+      UserPoolId: !Ref UserPool
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: "profile email openid"
+      AttributeMapping:
+        email: email
+        username: sub
+        name: name
+
+  # Cognito User Pool Client
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'BikinAiWebClient${EnvironmentSuffix}'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      SupportedIdentityProviders:
+        - COGNITO
+        - Google
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+        - aws.cognito.signin.user.admin
+      ReadAttributes:
+        - email
+        - name
+        - phone_number
+        - custom:term_and_condition
+      WriteAttributes:
+        - email
+        - name
+        - phone_number
+        - custom:term_and_condition
+      CallbackURLs:
+        - !Ref FrontendCallbackUrl
+      LogoutURLs:
+        - !Ref FrontendLogoutUrl
+    DependsOn: GoogleIdentityProvider
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref ApiStageName
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        AllowCredentials: false
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # API Function
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 30
+      MemorySize: 512
+      Architectures:
+        - x86_64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfileTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TopupCreditTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PricingTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub 'arn:aws:s3:::${S3ResourceBucketName}/*'
+      Environment:
+        Variables:
+          PROFILE_TABLE_NAME: !Ref ProfileTable
+          TOPUP_CREDIT_TABLE_NAME: !Ref TopupCreditTable
+          TOPUP_CREDIT_USER_EMAIL_INDEX: UserEmailIndex
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          USER_REQUEST_USER_EMAIL_INDEX: UserEmailCreatedIndex
+          PRICING_TABLE_NAME: !Ref PricingTable
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          MIDTRANS_API_URL: !Ref MidtransApiUrl
+          MIDTRANS_FINISH_CALLBACK_URL: !Ref MidtransFinishCallbackUrl
+          MIDTRANS_SERVER_KEY: !Ref MidtransServerKey
+          # ─ Worker A: env vars untuk Redis queue & QStash ───────────────────
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          QSTASH_TOKEN: !Ref QStashToken
+          WORKER_B_QSTASH_URL: !Ref WorkerBQStashUrl
+      Events:
+        GetUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /user
+            Method: get
+        GetCredit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /credit
+            Method: get
+        GetUsage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /usage
+            Method: get
+        GetPricing:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /pricing/{key}
+            Method: get
+        GetTopupDetail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /topup/{orderId}
+            Method: get
+        CreateSnap:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /snap
+            Method: post
+        PostResource:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /resource
+            Method: post
+        HelloWorld:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /hello
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  CognitoPostAuthTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: postAuth.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfileTable
+      Environment:
+        Variables:
+          PROFILE_TABLE_NAME: !Ref ProfileTable
+
+  MidtransWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: midtransWebhook.handler
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TopupCreditTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfileTable
+      Environment:
+        Variables:
+          TRANSACTION_TABLE_NAME: !Ref TransactionTable
+          TOPUP_CREDIT_TABLE_NAME: !Ref TopupCreditTable
+          PROFILE_TABLE_NAME: !Ref ProfileTable
+      Events:
+        MidtransWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /midtrans/webhook
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  # ────────────────────────────────────────────────────────────────
+  # Worker B — Gatekeeper (dipanggil via QStash, bukan user langsung)
+  # ────────────────────────────────────────────────────────────────
+  WorkerBFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: workerB.handler
+      Runtime: nodejs20.x
+      Timeout: 60           # RunPod dispatch bisa butuh beberapa detik
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Policies:
+        # Worker B tidak baca DynamoDB secara langsung,
+        # tapi butuh akses internet untuk Upstash + RunPod/GCP
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          RUNPOD_API_KEY: !Ref RunPodApiKey
+          RUNPOD_ENDPOINT_ID: !Ref RunPodEndpointId
+          GCP_WEBHOOK_URL: !Ref GcpWebhookUrl
+          WORKER_URLS: !Ref WorkerUrls
+          WORKER_B_QSTASH_URL: !Ref WorkerBQStashUrl
+          WORKER_C_URL: !Ref WorkerCUrl
+          QSTASH_TOKEN: !Ref QStashToken
+          MAX_ACTIVE_SLOTS: !Ref MaxActiveSlots
+      Events:
+        WorkerBInvoke:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /worker-b
+            Method: post
+            Auth:
+              Authorizer: NONE  # Dipanggil oleh QStash (bukan user)
+
+  # ────────────────────────────────────────────────────────────────
+  # Worker C — Finish Line & Re-activator (webhook dari RunPod/GCP)
+  # ────────────────────────────────────────────────────────────────
+  WorkerCFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: workerC.handler
+      Runtime: nodejs20.x
+      Timeout: 30
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+      Environment:
+        Variables:
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          WORKER_B_QSTASH_URL: !Ref WorkerBQStashUrl
+          QSTASH_TOKEN: !Ref QStashToken
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+      Events:
+        WorkerCWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /worker-c
+            Method: post
+            Auth:
+              Authorizer: NONE  # Dipanggil RunPod/GCP secara langsung
+
+  # ────────────────────────────────────────────────────────────────
+  # Dummy Worker — Mocking eksternal worker untuk test
+  # ────────────────────────────────────────────────────────────────
+  DummyWorkerFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsDevEnvironment
+    Properties:
+      CodeUri: src/
+      Handler: dummyWorker.handler
+      Runtime: nodejs20.x
+      Timeout: 15
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Events:
+        DummyWorkerInvoke:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /dummy-worker
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  CognitoInvokePermissionForPostAuth:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CognitoPostAuthTriggerFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for active stage"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}"
+  UserPoolId:
+    Description: "Cognito User Pool ID"
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: "Cognito User Pool Client ID"
+    Value: !Ref UserPoolClient
+  MidtransWebhookUrl:
+    Description: "Public webhook URL for Midtrans notifications"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/midtrans/webhook"
+  UserPoolDomainUrl:
+    Description: "Hosted UI base URL (custom, Cognito bawaan, atau placeholder jika domain tidak di-provision)"
+    Value: !If
+      - CreateUserPoolDomain
+      - !If
+        - UseCognitoCustomDomain
+        - !Sub 'https://${CognitoCustomDomainHostname}'
+        - !Sub 'https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com'
+      - '(UserPoolDomain tidak aktif — set ProvisionCognitoUserPoolDomain=true lalu deploy)'
+  DummyWorkerUrl:
+    Description: "URL for the Dummy Worker (use this in WorkerUrls for testing)"
+    Condition: IsDevEnvironment
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/dummy-worker"
+  WorkerAUrl:
+    Description: "Base URL for Worker A (Main API /resource endpoint)"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}"
+  WorkerBUrl:
+    Description: "URL for Worker B (Gatekeeper, called by QStash)"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/worker-b"
+  WorkerCUrl:
+    Description: "URL for Worker C (Finish Line, called by external worker)"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/worker-c"

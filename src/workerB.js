@@ -13,6 +13,15 @@
  */
 
 const { Redis } = require("@upstash/redis");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { callOpenAILLM, callGoogleTTS, uploadToS3 } = require("./services");
+const { generateTTS } = require("./core/tts");
+const fs = require("fs");
+const path = require("path");
+
+const REGION = process.env.AWS_REGION || "ap-southeast-1";
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
 // ─── Env vars ────────────────────────────────────────────────────────────────
 const UPSTASH_REDIS_REST_URL  = process.env.UPSTASH_REDIS_REST_URL;
@@ -210,10 +219,53 @@ exports.handler = async (event) => {
     };
     await redis.set(`${JOB_DETAIL_PREFIX}${jobId}`, JSON.stringify(processingDetail));
 
-    // 7. Dispatch ke selectedWorkerUrl
-    // PENTING: dispatchToWorker menunggu response HTTP dari worker (sinkronus).
-    // Untuk dummy worker / RunPod async, response datang SETELAH Worker C dipanggil.
-    // Jangan lakukan redis.set SETELAH dispatch karena akan menimpa status COMPLETED dari Worker C.
+    // 7. Heavy AI Processing (UGC-P) — Fire and Forget support
+    if (jobDetail.request_type === "UGC-P") {
+      try {
+        console.log(`[WorkerB] Processing UGC-P AI requirements for job ${jobId}`);
+        const templatePath = path.join(__dirname, "PROMPT_UGC_PRODUCT");
+        const template = fs.readFileSync(templatePath, "utf-8");
+        
+        const orientationMap = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" };
+        const orientation = orientationMap[jobDetail.aspect_ratio] || "portrait";
+        const userPrompt = `1. {product_description}: ${jobDetail.prompt}\n2. {video_duration}: 15 detik\n3. {image_orientation}: ${orientation}`;
+        
+        const aiResponse = await callOpenAILLM(template, userPrompt);
+        if (aiResponse) {
+          const llmResponse = JSON.parse(aiResponse);
+          jobDetail.prompt = llmResponse.ltx_prompt || aiResponse; // Update prompt for executor
+          
+          // Update DynamoDB
+          await dynamo.send(new UpdateCommand({
+            TableName: process.env.USER_REQUEST_TABLE_NAME,
+            Key: { uuid: jobId, user_email: jobDetail.user_email },
+            UpdateExpression: "SET llm_response = :lr, updated_at = :now",
+            ExpressionAttributeValues: { ":lr": llmResponse, ":now": new Date().toISOString() }
+          }));
+
+
+
+          // Trigger Google TTS if script exists
+          if (llmResponse.tts_script && llmResponse.tts_global_config) {
+            await generateTTS({
+              jobId,
+              userEmail: jobDetail.user_email,
+              userId: jobDetail.user_id,
+              llmResponse,
+              S3_RESOURCE_BUCKET: process.env.S3_RESOURCE_BUCKET || "dapurartisan",
+              dynamo,
+              USER_REQUEST_TABLE: process.env.USER_REQUEST_TABLE_NAME,
+              callGoogleTTS,
+              uploadToS3
+            });
+          }
+        }
+      } catch (e) {
+        console.error("[WorkerB] AI processing error:", e);
+      }
+    }
+
+    // 8. Dispatch ke selectedWorkerUrl
     const executorJobId = await dispatchToWorker(selectedWorkerUrl, jobId, jobDetail);
     console.log(`Job ${jobId} dikirim ke ${selectedWorkerUrl}, executor_job_id: ${executorJobId}`);
     // executor_job_id tidak disimpan kembali ke Redis untuk menghindari overwrite status dari Worker C.

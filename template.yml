@@ -223,6 +223,8 @@ Resources:
         AttributeType: S
       - AttributeName: image_prompt_id
         AttributeType: S
+      - AttributeName: comfy_prompt_id
+        AttributeType: S
       KeySchema:
       - AttributeName: uuid
         KeyType: HASH
@@ -248,6 +250,12 @@ Resources:
       - IndexName: ImagePromptIdIndex
         KeySchema:
         - AttributeName: image_prompt_id
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      - IndexName: ComfyPromptIdIndex
+        KeySchema:
+        - AttributeName: comfy_prompt_id
           KeyType: HASH
         Projection:
           ProjectionType: ALL
@@ -743,6 +751,10 @@ Resources:
           STATUS_CREATED_INDEX_NAME: StatusCreatedIndex
           S3_RESOURCE_BUCKET:
             Ref: S3ResourceBucketName
+          UPSTASH_REDIS_REST_URL:
+            Ref: UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN:
+            Ref: UpstashRedisRestToken
           COMFY_MAX_CONCURRENT_JOBS:
             Ref: ComfyMaxConcurrentJobs
       Events:
@@ -783,6 +795,9 @@ Resources:
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
           S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
+          VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
       Events:
         ComfyUIWebhookEvent:
           Type: Api
@@ -792,10 +807,6 @@ Resources:
             RestApiId: !Ref Api
             Auth:
               Authorizer: NONE # Webhook usually doesn't have Cognito auth
-          Environment:
-            Variables:
-              UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
-              UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
 
 Outputs:
   ApiEndpoint:

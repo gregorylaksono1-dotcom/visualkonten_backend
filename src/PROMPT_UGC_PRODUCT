@@ -19,9 +19,9 @@ STRICT RULES & CONSTRAINTS:
    - CLOSING MUST HAVE A GENERAL CTA: You MUST always end the script with a strong, urgent Call-To-Action. STRICTLY AVOID platform-specific terms like "keranjang kuning" or "link di bio". Use general e-commerce terms instead (e.g., "segera order sekarang...", "yuk langsung saja di checkout!", "buruan amankan stoknya sebelum kehabisan!", "langsung aja di order ya!").
    - Use heavy punctuation for TTS pauses (..., !, ,).
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
-     * The target Indonesian speaking rate is roughly 2.5 to 3 words per second.
-     * You MUST calculate the exact word count required: ({video_duration} * 2.8).
-     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 40 to 45 words. If duration is 10 seconds, it MUST be 25 to 30 words.
+     * The target Indonesian speaking rate is roughly 1.5 to 2 words per second.
+     * You MUST calculate the exact word count required: ({video_duration} * 2).
+     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 30 to 34 words. If duration is 10 seconds, it MUST be 20 to 24 words.
      * Do NOT output scripts shorter than the required word count, otherwise the audio will finish before the video ends.
 
 3. TTS & GENDER MATCHING (GEMINI FLASH-TTS): 

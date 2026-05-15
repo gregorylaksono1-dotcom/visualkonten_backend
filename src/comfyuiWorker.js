@@ -17,7 +17,10 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { buildWorkflow } = require("./workflows");
-const { callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey } = require("./services");
+const { 
+  callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey,
+  uploadInputImage, submitWorkflow, getOutputUrl, resolveSignedUrl
+} = require("./services");
 const { generateComfyUIImage } = require("./core/imageGeneration");
 const { generateTTS } = require("./core/tts");
 const fs = require("fs");
@@ -34,74 +37,7 @@ const REGION = process.env.AWS_REGION || "ap-southeast-1";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
 // ─── ComfyUI API helpers ──────────────────────────────────────────────────────
-
-const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
-  if (!apiKey) throw new Error("API Key is required for uploadInputImage");
-  const imageRes = await fetch(imageUrl);
-  if (!imageRes.ok) throw new Error(`Gagal download input image: ${imageRes.status}`);
-  const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
-
-  const formData = new FormData();
-  formData.append("image", new Blob([imageBuffer]), filename);
-  formData.append("overwrite", "true");
-
-  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
-    method: "POST",
-    headers: { "X-API-Key": apiKey },
-    body: formData,
-  });
-
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text();
-    throw new Error(`ComfyUI image upload failed: ${text}`);
-  }
-  const data = await uploadRes.json();
-  return data.name;
-};
-
-const submitWorkflow = async (workflow, apiKey) => {
-  if (!apiKey) throw new Error("API Key is required for submitWorkflow");
-  const res = await fetch(`${COMFY_BASE_URL}/api/prompt`, {
-    method: "POST",
-    headers: {
-      "X-API-Key": apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ prompt: workflow }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`ComfyUI submit failed: ${text}`);
-  }
-  const data = await res.json();
-  return data.prompt_id;
-};
-
-const getOutputUrl = async (promptId, apiKey) => {
-  const res = await fetch(`${COMFY_BASE_URL}/api/jobs/${promptId}`, {
-    headers: { "X-API-Key": apiKey },
-  });
-  if (!res.ok) return null;
-
-  const job = await res.json();
-  const outputs = job.outputs || {};
-  for (const nodeOutputs of Object.values(outputs)) {
-    const files = [...(nodeOutputs.gifs || []), ...(nodeOutputs.videos || []), ...(nodeOutputs.images || [])];
-    for (const file of files) {
-      const url = await resolveSignedUrl(file);
-      if (url) return url;
-    }
-  }
-  return null;
-};
-
-const resolveSignedUrl = async (fileInfo, apiKey) => {
-  if (!fileInfo?.filename) return null;
-  const params = new URLSearchParams({ filename: fileInfo.filename, subfolder: fileInfo.subfolder || "", type: fileInfo.type || "output" });
-  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, { headers: { "X-API-Key": apiKey }, redirect: "manual" });
-  return res.headers.get("location");
-};
+// (Moved to services.js)
 
 // ─── DynamoDB helpers ─────────────────────────────────────────────────────────
 
@@ -163,23 +99,11 @@ const checkSingleJobStatus = async (job, redis) => {
     if (!res.ok) return;
     const { status } = await res.json();
     if (status === "completed" || status === "failed" || status === "cancelled") {
-      // 1. Update DynamoDB
       if (status === "completed") {
         const resultUrl = await getOutputUrl(promptId, apiKey);
         await updateDynamoStatus(job.uuid, job.user_email, "COMPLETED", { resultUrl });
       } else {
         await updateDynamoStatus(job.uuid, job.user_email, "FAILED");
-      }
-
-      // 2. Decrement Redis counter for the API Key
-      if (redis && apiKey) {
-        try {
-          const redisKey = `comfyui_job_${apiKey}`;
-          await redis.decr(redisKey);
-          console.log(`[Redis] Decremented ${redisKey} in poller for job ${job.uuid}`);
-        } catch (redisErr) {
-          console.error(`[Redis] Error decrementing ${job.uuid}:`, redisErr.message);
-        }
       }
     }
   } catch (err) {
@@ -201,18 +125,10 @@ const handleSubmission = async (event) => {
   let finalJobPrompt = prompt;
   let currentS3ImageUrls = Array.isArray(s3ImageUrls) ? s3ImageUrls : (s3ImageUrls ? [s3ImageUrls] : []);
 
-  // 2. Dev Dummy Check (Skip ComfyUI Cloud in Dev)
+  // 1. Dev Dummy Check (Skip ComfyUI Cloud in Dev for Video Gen)
   const isDev = process.env.USER_REQUEST_TABLE_NAME && process.env.USER_REQUEST_TABLE_NAME.endsWith("-dev");
-  if (isDev) {
-    console.log(`[Dev Dummy] Simulating job ${jobId}`);
-    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { comfyPromptId: `dummy-${jobId}` });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const dummyUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
-    await updateDynamoStatus(jobId, userEmail, "COMPLETED", { resultUrl: dummyUrl });
-    return;
-  }
 
-  // 3. Pick ComfyUI API Key early to be used for both Image Gen and Video Gen
+  // 2. Pick ComfyUI API Key early to be used for both Image Gen and Video Gen
   const redis = getRedis();
   const services = require("./services");
   const apiKeysString = await services.getComfyApiKeys();
@@ -223,7 +139,7 @@ const handleSubmission = async (event) => {
     return;
   }
 
-  // 4. Process Heavy AI Requirements (LLM & Gemini)
+  // 3. Process Heavy AI Requirements (LLM & Gemini)
   if (requestType === "UGC-P") {
     try {
       console.log(`[Worker] Processing UGC-P AI requirements for job ${jobId}`);
@@ -262,7 +178,7 @@ const handleSubmission = async (event) => {
               uploadToS3
             });
           }
-          // Trigger ComfyUI Image Generation (Flux.2) if we have images
+          // Trigger ComfyUI Image Generation (Flux.2)
           if (currentS3ImageUrls.length > 0) {
             await generateComfyUIImage({
               jobId,
@@ -294,6 +210,24 @@ const handleSubmission = async (event) => {
     }
   }
 
+  // 4. Dev Simulation for Video
+  if (isDev) {
+    console.log(`[Dev Dummy] Simulating LTX Video generation for ${jobId}`);
+    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { comfyPromptId: `dummy-${jobId}` });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const dummyUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
+    await updateDynamoStatus(jobId, userEmail, "COMPLETED", { resultUrl: dummyUrl });
+
+    // Manual decrement for Video part slot
+    try {
+      const redisKey = `comfyui_job_${comfyApiKey}`;
+      await redis.decr(redisKey);
+    } catch (e) { }
+
+    return;
+  }
+
+  // 5. Submit Video Generation (LTX)
   try {
     const imageUrls = currentS3ImageUrls;
     const uploadedFiles = {};
@@ -302,16 +236,21 @@ const handleSubmission = async (event) => {
       uploadedFiles[key] = await uploadInputImage(imageUrls[i], `${jobId}_${key}.png`, comfyApiKey);
     }
 
-    const workflow = buildWorkflow(requestType, { prompt, videoQuality, aspectRatio, uploadedFiles });
+    const workflow = buildWorkflow(requestType, { prompt: finalJobPrompt, videoQuality, aspectRatio, uploadedFiles });
     const promptId = await submitWorkflow(workflow, comfyApiKey);
 
-    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { 
+    await updateDynamoStatus(jobId, userEmail, "PROCESSING", {
       comfyPromptId: promptId,
-      usedApiKey: comfyApiKey 
+      usedApiKey: comfyApiKey
     });
   } catch (err) {
     console.error(`[Submitter] Error job ${jobId}:`, err.message);
     await updateDynamoStatus(jobId, userEmail, "FAILED");
+    // Decrement on failure
+    try {
+      const redisKey = `comfyui_job_${comfyApiKey}`;
+      await redis.decr(redisKey);
+    } catch (e) { }
   }
 };
 

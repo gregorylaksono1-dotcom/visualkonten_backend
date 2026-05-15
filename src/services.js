@@ -427,17 +427,121 @@ const pickComfyApiKey = async (apiKeysString, redis) => {
   if (!apiKeysString || !redis) return null;
   const keys = apiKeysString.split(",").map(k => k.trim()).filter(k => k);
   if (keys.length === 0) return null;
-
+  console.log(`[Worker] Keys: ${keys}`);
   for (const key of keys) {
     const redisKey = `comfyui_job_${key}`;
     const count = await redis.get(redisKey);
+    console.log(`[Worker] Count: ${count} for key ${key}`);
     const currentCount = parseInt(count || "0");
     const maxJobs = parseInt(process.env.COMFY_MAX_CONCURRENT_JOBS || "1");
     if (currentCount < maxJobs) {
+      console.log(`Picking key ${key}`)
       // Pick this key and increment
       await redis.incr(redisKey);
-      console.log(`[Redis] Picked API Key and incremented ${redisKey}`);
+      await redis.expire(redisKey, 600); // Auto-release after 10 mins if something goes wrong
+      console.log(`[Redis] Picked API Key and incremented ${redisKey} (TTL: 10m)`);
       return key;
+    }
+  }
+  return null;
+};
+
+const COMFY_BASE_URL = "https://cloud.comfy.org";
+
+const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
+  if (!apiKey) throw new Error("API Key is required for uploadInputImage");
+  const imageRes = await fetch(imageUrl);
+  if (!imageRes.ok) throw new Error(`Gagal download input image: ${imageRes.status}`);
+  const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
+
+  const formData = new FormData();
+  formData.append("image", new Blob([imageBuffer]), filename);
+  formData.append("overwrite", "true");
+
+  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
+    method: "POST",
+    headers: { "X-API-Key": apiKey },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const text = await uploadRes.text();
+    throw new Error(`ComfyUI image upload failed: ${text}`);
+  }
+  const data = await uploadRes.json();
+  return data.name;
+};
+
+const uploadInputAudio = async (audioUrl, filename = "input_audio.wav", apiKey) => {
+  if (!apiKey) throw new Error("API Key is required for uploadInputAudio");
+  const audioRes = await fetch(audioUrl);
+  if (!audioRes.ok) throw new Error(`Gagal download input audio: ${audioRes.status}`);
+  const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+  const formData = new FormData();
+  formData.append("audio", new Blob([audioBuffer]), filename);
+  formData.append("overwrite", "true");
+
+  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/audio`, {
+    method: "POST",
+    headers: { "X-API-Key": apiKey },
+    body: formData,
+  });
+
+  if (!uploadRes.ok) {
+    const text = await uploadRes.text();
+    throw new Error(`ComfyUI audio upload failed: ${text}`);
+  }
+  const data = await uploadRes.json();
+  return data.name;
+};
+
+const submitWorkflow = async (workflow, apiKey) => {
+  if (!apiKey) throw new Error("API Key is required for submitWorkflow");
+  const res = await fetch(`${COMFY_BASE_URL}/api/prompt`, {
+    method: "POST",
+    headers: {
+      "X-API-Key": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ prompt: workflow }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`ComfyUI submit failed: ${text}`);
+  }
+  const data = await res.json();
+  return data.prompt_id;
+};
+
+const resolveSignedUrl = async (fileInfo, apiKey) => {
+  if (!fileInfo?.filename || !apiKey) return null;
+  const params = new URLSearchParams({ 
+    filename: fileInfo.filename, 
+    subfolder: fileInfo.subfolder || "", 
+    type: fileInfo.type || "output" 
+  });
+  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, { 
+    headers: { "X-API-Key": apiKey }, 
+    redirect: "manual" 
+  });
+  return res.headers.get("location");
+};
+
+const getOutputUrl = async (promptId, apiKey) => {
+  const res = await fetch(`${COMFY_BASE_URL}/api/jobs/${promptId}`, {
+    headers: { "X-API-Key": apiKey },
+  });
+  if (!res.ok) return null;
+
+  const job = await res.json();
+  const outputs = job.outputs || {};
+  for (const nodeOutputs of Object.values(outputs)) {
+    const files = [...(nodeOutputs.gifs || []), ...(nodeOutputs.videos || []), ...(nodeOutputs.images || [])];
+    for (const file of files) {
+      const url = await resolveSignedUrl(file, apiKey);
+      if (url) return url;
     }
   }
   return null;
@@ -469,5 +573,10 @@ module.exports = {
   getRedis,
   pickComfyApiKey,
   getComfyApiKeys,
+  uploadInputImage,
+  uploadInputAudio,
+  submitWorkflow,
+  getOutputUrl,
+  resolveSignedUrl
 };
 

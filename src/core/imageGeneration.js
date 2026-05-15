@@ -29,7 +29,7 @@ async function generateComfyUIImage(params) {
     const refImageName = await uploadInputImage(currentS3ImageUrls[0], `${jobId}_ref.png`, comfyApiKey);
 
     // Load Flux workflow (need to resolve path relative to this file)
-    const fluxPath = path.join(__dirname, "..", "Flux.2 [Klein] 4B Distilled_ Image Edit (API).json");
+    const fluxPath = path.join(__dirname, "..", "workflow", "Flux.2 [Klein] 4B Distilled_ Image Edit (API).json");
     const fluxWorkflow = JSON.parse(fs.readFileSync(fluxPath, "utf-8"));
 
     // 1. Node 76: Load Image
@@ -37,16 +37,18 @@ async function generateComfyUIImage(params) {
       fluxWorkflow["76"].inputs.image = refImageName;
     }
 
-    // 2. Node 75:66: Width and Height
+    // 2. Node 75:66: Width and Height based on videoQuality and aspectRatio
     let w = 720, h = 1280; // default 720p portrait
-    if (videoQuality === "1080p") {
-      if (aspectRatio === "16:9") { w = 1920; h = 1080; }
-      else if (aspectRatio === "1:1") { w = 1080; h = 1080; }
-      else { w = 1080; h = 1920; }
-    } else { // 720p or fallback
+    
+    if (videoQuality === "480p") {
+      if (aspectRatio === "16:9") { w = 854; h = 480; }
+      else if (aspectRatio === "1:1") { w = 480; h = 480; }
+      else { w = 480; h = 854; } // 9:16
+    } else { 
+      // Default to 720p
       if (aspectRatio === "16:9") { w = 1280; h = 720; }
-      else if (aspectRatio === "1:1") { w = 1024; h = 1024; }
-      else { w = 720; h = 1280; }
+      else if (aspectRatio === "1:1") { w = 720; h = 720; }
+      else { w = 720; h = 1280; } // 9:16
     }
 
     if (fluxWorkflow["75:66"] && fluxWorkflow["75:66"].inputs) {

@@ -24,15 +24,15 @@ const REGION = process.env.AWS_REGION || "ap-southeast-1";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
 // ─── Env vars ────────────────────────────────────────────────────────────────
-const UPSTASH_REDIS_REST_URL  = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
-const RUNPOD_API_KEY           = process.env.RUNPOD_API_KEY;
-const RUNPOD_ENDPOINT_ID       = process.env.RUNPOD_ENDPOINT_ID; // RunPod serverless endpoint id
-const GCP_WEBHOOK_URL          = process.env.GCP_WEBHOOK_URL;    // alternatif GCP Cloud Run URL
-const WORKER_B_QSTASH_URL      = process.env.WORKER_B_QSTASH_URL; // URL publik Worker B ini
-const WORKER_C_URL             = process.env.WORKER_C_URL;        // URL publik Worker C (webhook target untuk RunPod)
-const QSTASH_TOKEN             = process.env.QSTASH_TOKEN;
-const MAX_ACTIVE_SLOTS         = Number(process.env.MAX_ACTIVE_SLOTS || "2"); // Set default max active job = 2
+const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
+const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID; // RunPod serverless endpoint id
+const GCP_WEBHOOK_URL = process.env.GCP_WEBHOOK_URL;    // alternatif GCP Cloud Run URL
+const WORKER_B_QSTASH_URL = process.env.WORKER_B_QSTASH_URL; // URL publik Worker B ini
+const WORKER_C_URL = process.env.WORKER_C_URL;        // URL publik Worker C (webhook target untuk RunPod)
+const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
+const MAX_ACTIVE_SLOTS = Number(process.env.MAX_ACTIVE_SLOTS || "2"); // Set default max active job = 2
 
 // Konfigurasi Worker URLs
 let workerUrls = [];
@@ -47,8 +47,8 @@ if (process.env.WORKER_URLS) {
 }
 
 // Kunci Redis
-const TASK_QUEUE_KEY   = "task_queue";
-const ACTIVE_JOBS_KEY  = "active_jobs";
+const TASK_QUEUE_KEY = "task_queue";
+const ACTIVE_JOBS_KEY = "active_jobs";
 const JOB_DETAIL_PREFIX = "job_detail:";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -117,9 +117,9 @@ const dispatchToWorker = async (url, jobId, jobDetail) => {
     const text = await res.text().catch(() => "");
     throw new Error(`Worker dispatch failed (${res.status}): ${text}`);
   }
-  
+
   let json = {};
-  try { json = await res.json(); } catch(e) {}
+  try { json = await res.json(); } catch (e) { }
   return json.job_id || json.id || jobId;
 };
 
@@ -225,16 +225,16 @@ exports.handler = async (event) => {
         console.log(`[WorkerB] Processing UGC-P AI requirements for job ${jobId}`);
         const templatePath = path.join(__dirname, "PROMPT_UGC_PRODUCT");
         const template = fs.readFileSync(templatePath, "utf-8");
-        
+
         const orientationMap = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" };
         const orientation = orientationMap[jobDetail.aspect_ratio] || "portrait";
         const userPrompt = `1. {product_description}: ${jobDetail.prompt}\n2. {video_duration}: 15 detik\n3. {image_orientation}: ${orientation}`;
-        
+
         const aiResponse = await callOpenAILLM(template, userPrompt);
         if (aiResponse) {
           const llmResponse = JSON.parse(aiResponse);
           jobDetail.prompt = llmResponse.ltx_prompt || aiResponse; // Update prompt for executor
-          
+
           // Update DynamoDB
           await dynamo.send(new UpdateCommand({
             TableName: process.env.USER_REQUEST_TABLE_NAME,
@@ -272,7 +272,7 @@ exports.handler = async (event) => {
 
     // 8. Jika masih ada slot kosong (di url mana saja) dan ada item di antrean, kick Worker B lagi
     const remaining = await redis.llen(TASK_QUEUE_KEY);
-    
+
     let hasEmptySlot = false;
     for (const url of workerUrls) {
       const activeCount = await redis.scard(`${ACTIVE_JOBS_KEY}:${url}`);

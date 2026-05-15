@@ -25,7 +25,6 @@ const path = require("path");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const COMFY_BASE_URL = "https://cloud.comfy.org";
-const COMFY_API_KEY = process.env.COMFY_CLOUD_API_KEY;
 const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
 const STATUS_INDEX = process.env.STATUS_CREATED_INDEX_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -36,7 +35,8 @@ const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }
 
 // ─── ComfyUI API helpers ──────────────────────────────────────────────────────
 
-const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey = COMFY_API_KEY) => {
+const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
+  if (!apiKey) throw new Error("API Key is required for uploadInputImage");
   const imageRes = await fetch(imageUrl);
   if (!imageRes.ok) throw new Error(`Gagal download input image: ${imageRes.status}`);
   const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
@@ -59,7 +59,8 @@ const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey =
   return data.name;
 };
 
-const submitWorkflow = async (workflow, apiKey = COMFY_API_KEY) => {
+const submitWorkflow = async (workflow, apiKey) => {
+  if (!apiKey) throw new Error("API Key is required for submitWorkflow");
   const res = await fetch(`${COMFY_BASE_URL}/api/prompt`, {
     method: "POST",
     headers: {
@@ -77,9 +78,9 @@ const submitWorkflow = async (workflow, apiKey = COMFY_API_KEY) => {
   return data.prompt_id;
 };
 
-const getOutputUrl = async (promptId) => {
+const getOutputUrl = async (promptId, apiKey) => {
   const res = await fetch(`${COMFY_BASE_URL}/api/jobs/${promptId}`, {
-    headers: { "X-API-Key": COMFY_API_KEY },
+    headers: { "X-API-Key": apiKey },
   });
   if (!res.ok) return null;
 
@@ -95,10 +96,10 @@ const getOutputUrl = async (promptId) => {
   return null;
 };
 
-const resolveSignedUrl = async (fileInfo) => {
+const resolveSignedUrl = async (fileInfo, apiKey) => {
   if (!fileInfo?.filename) return null;
   const params = new URLSearchParams({ filename: fileInfo.filename, subfolder: fileInfo.subfolder || "", type: fileInfo.type || "output" });
-  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, { headers: { "X-API-Key": COMFY_API_KEY }, redirect: "manual" });
+  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, { headers: { "X-API-Key": apiKey }, redirect: "manual" });
   return res.headers.get("location");
 };
 
@@ -151,20 +152,34 @@ const getProcessingJobs = async () => {
 const checkSingleJobStatus = async (job, redis) => {
   const promptId = job.comfy_prompt_id;
   if (!promptId) return;
-
   try {
+    const apiKey = job.used_api_key;
+    if (!apiKey) return;
+
     const res = await fetch(`${COMFY_BASE_URL}/api/job/${promptId}/status`, {
-      headers: { "X-API-Key": COMFY_API_KEY },
+      headers: { "X-API-Key": apiKey },
     });
 
     if (!res.ok) return;
     const { status } = await res.json();
     if (status === "completed" || status === "failed" || status === "cancelled") {
+      // 1. Update DynamoDB
       if (status === "completed") {
-        const resultUrl = await getOutputUrl(promptId);
+        const resultUrl = await getOutputUrl(promptId, apiKey);
         await updateDynamoStatus(job.uuid, job.user_email, "COMPLETED", { resultUrl });
       } else {
         await updateDynamoStatus(job.uuid, job.user_email, "FAILED");
+      }
+
+      // 2. Decrement Redis counter for the API Key
+      if (redis && apiKey) {
+        try {
+          const redisKey = `comfyui_job_${apiKey}`;
+          await redis.decr(redisKey);
+          console.log(`[Redis] Decremented ${redisKey} in poller for job ${job.uuid}`);
+        } catch (redisErr) {
+          console.error(`[Redis] Error decrementing ${job.uuid}:`, redisErr.message);
+        }
       }
     }
   } catch (err) {
@@ -186,8 +201,29 @@ const handleSubmission = async (event) => {
   let finalJobPrompt = prompt;
   let currentS3ImageUrls = Array.isArray(s3ImageUrls) ? s3ImageUrls : (s3ImageUrls ? [s3ImageUrls] : []);
 
-  // 1. Process Heavy AI Requirements (LLM & Vertex AI)
-  // We do this first so it runs even in dev environment for testing.
+  // 2. Dev Dummy Check (Skip ComfyUI Cloud in Dev)
+  const isDev = process.env.USER_REQUEST_TABLE_NAME && process.env.USER_REQUEST_TABLE_NAME.endsWith("-dev");
+  if (isDev) {
+    console.log(`[Dev Dummy] Simulating job ${jobId}`);
+    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { comfyPromptId: `dummy-${jobId}` });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const dummyUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
+    await updateDynamoStatus(jobId, userEmail, "COMPLETED", { resultUrl: dummyUrl });
+    return;
+  }
+
+  // 3. Pick ComfyUI API Key early to be used for both Image Gen and Video Gen
+  const redis = getRedis();
+  const services = require("./services");
+  const apiKeysString = await services.getComfyApiKeys();
+  const comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
+
+  if (!comfyApiKey) {
+    console.log(`[Worker] All ComfyUI API keys are busy. Skipping job ${jobId} for now.`);
+    return;
+  }
+
+  // 4. Process Heavy AI Requirements (LLM & Gemini)
   if (requestType === "UGC-P") {
     try {
       console.log(`[Worker] Processing UGC-P AI requirements for job ${jobId}`);
@@ -212,7 +248,7 @@ const handleSubmission = async (event) => {
             ExpressionAttributeValues: { ":lr": llmResponse, ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) }
           }));
 
-          // Trigger Google TTS if script exists
+          // Trigger Gemini TTS
           if (llmResponse.tts_script && llmResponse.tts_global_config) {
             await generateTTS({
               jobId,
@@ -244,8 +280,8 @@ const handleSubmission = async (event) => {
               submitWorkflow,
               getOutputUrl,
               uploadToS3,
-              redis: getRedis(),
-              comfyApiKey: comfyApiKey // Use the picked key
+              redis,
+              comfyApiKey // Reusing the same key picked above
             });
           }
 
@@ -258,25 +294,7 @@ const handleSubmission = async (event) => {
     }
   }
 
-  // 2. Dev Dummy Check (Skip ComfyUI Cloud in Dev)
-  const isDev = process.env.USER_REQUEST_TABLE_NAME && process.env.USER_REQUEST_TABLE_NAME.endsWith("-dev");
-  if (isDev) {
-    console.log(`[Dev Dummy] Simulating job ${jobId}`);
-    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { comfyPromptId: `dummy-${jobId}` });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const dummyUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
-    await updateDynamoStatus(jobId, userEmail, "COMPLETED", { resultUrl: dummyUrl });
-    return;
-  }
-
   try {
-    const redis = getRedis();
-    const comfyApiKey = await pickComfyApiKey(COMFY_API_KEY, redis);
-    if (!comfyApiKey) {
-      console.log(`[Worker] All ComfyUI API keys are busy. Skipping job ${jobId} for now.`);
-      return; // Job stays in PENDING or we could re-enqueue
-    }
-
     const imageUrls = currentS3ImageUrls;
     const uploadedFiles = {};
     for (let i = 0; i < imageUrls.length; i++) {

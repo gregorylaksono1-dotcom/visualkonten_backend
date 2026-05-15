@@ -17,7 +17,6 @@ const {
   TransactWriteCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const { Redis } = require("@upstash/redis");
-const { GoogleAuth } = require("google-auth-library");
 const { parseCreditsFromPricingItem, buildCreditStatusFilterParts } = require("./utils");
 
 const region = process.env.AWS_REGION || "ap-southeast-1";
@@ -227,10 +226,11 @@ const sumSuccessfulSpending = async (userEmail) => {
 };
 
 const createMidtransSnapTransaction = async (midtransBody) => {
-  if (!MIDTRANS_API_URL || !MIDTRANS_SERVER_KEY) {
+  const serverKey = await getMidtransServerKey() || MIDTRANS_SERVER_KEY;
+  if (!MIDTRANS_API_URL || !serverKey) {
     throw new Error("Midtrans API URL or Server Key is not configured.");
   }
-  const auth = Buffer.from(`${MIDTRANS_SERVER_KEY}:`).toString("base64");
+  const auth = Buffer.from(`${serverKey}:`).toString("base64");
   const res = await fetch(MIDTRANS_API_URL, {
     method: "POST",
     headers: {
@@ -256,22 +256,52 @@ const uploadToS3 = async (bucket, key, buffer, contentType) => {
   }));
 };
 
-let _cachedOpenAiKey = null;
-const getOpenAiKey = async () => {
-  if (_cachedOpenAiKey) return _cachedOpenAiKey;
+const MAIN_SECRET_ARN = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q";
+
+let _cachedSecrets = null;
+const getSecrets = async () => {
+  if (_cachedSecrets) return _cachedSecrets;
   try {
     const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
     if (!secretsClient) secretsClient = new SecretsManagerClient({ region });
-    
-    const arn = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:open_ai-wCZYqC";
-    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: arn }));
-    const secrets = JSON.parse(data.SecretString);
-    _cachedOpenAiKey = secrets.secret_key;
-    return _cachedOpenAiKey;
+    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: MAIN_SECRET_ARN }));
+    _cachedSecrets = JSON.parse(data.SecretString);
+    return _cachedSecrets;
   } catch (err) {
-    console.error("Failed to fetch OpenAI secret:", err);
-    return null;
+    console.error("Failed to fetch consolidated secrets:", err);
+    return {};
   }
+};
+
+const getOpenAiKey = async () => {
+  const secrets = await getSecrets();
+  return secrets.open_ai || null;
+};
+
+
+const getGeminiKey = async () => {
+  const secrets = await getSecrets();
+  return secrets.gemini_api_key || null;
+};
+
+const getMidtransServerKey = async () => {
+  const secrets = await getSecrets();
+  return secrets.midtrans_server_key || null;
+};
+
+const getGoogleClientId = async () => {
+  const secrets = await getSecrets();
+  return secrets.google_client_id || null;
+};
+
+const getGoogleClientSecret = async () => {
+  const secrets = await getSecrets();
+  return secrets.google_client_secret || null;
+};
+
+const getComfyApiKeys = async () => {
+  const secrets = await getSecrets();
+  return secrets.comfy_api_key || null;
 };
 
 const callOpenAILLM = async (systemPrompt, userPrompt) => {
@@ -317,122 +347,36 @@ const callOpenAILLM = async (systemPrompt, userPrompt) => {
   }
 };
 
-const getGoogleCloudCreds = async () => {
-  try {
-    const arn = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:vertexai-nE9ql9";
-    if (!arn) return null;
-
-    let secretData;
-    if (!arn.startsWith("arn:aws:secretsmanager")) {
-      secretData = JSON.parse(arn);
-    } else {
-      const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
-      if (!secretsClient) secretsClient = new SecretsManagerClient({ region });
-      
-      const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: arn }));
-      secretData = JSON.parse(data.SecretString);
-    }
-
-    // Check for the specific 'vertexai' key as requested
-    if (secretData.vertexai) {
-      const vVal = secretData.vertexai;
-      if (typeof vVal === "string") {
-        try {
-          const parsed = JSON.parse(vVal);
-          if (parsed.client_email) return parsed;
-        } catch (e) {}
-      }
-      if (typeof vVal === "object" && vVal !== null && vVal.client_email) return vVal;
-    }
-
-    // Check if it's the direct service account object
-    if (secretData.client_email) return secretData;
-
-    // If not, it might be wrapped in a Key/Value pair (common in Secrets Manager)
-    // We'll look for any value that looks like a JSON string or has client_email
-    const keys = Object.keys(secretData);
-    console.log("Secret keys found:", keys);
-
-    for (const key of keys) {
-      const val = secretData[key];
-      if (typeof val === "string" && val.includes("client_email")) {
-        try {
-          const nested = JSON.parse(val);
-          if (nested.client_email) {
-            console.log(`Found service account JSON inside key: ${key}`);
-            return nested;
-          }
-        } catch (e) { }
-      }
-      if (typeof val === "object" && val !== null && val.client_email) {
-        console.log(`Found service account object inside key: ${key}`);
-        return val;
-      }
-    }
-
-    console.error("Secret found but no valid service account JSON (missing client_email).");
-    return secretData; // Return anyway, auth library will throw the specific error
-  } catch (err) {
-    console.error("Failed to fetch Vertex AI credentials:", err);
-    return null;
-  }
-};
-
-
-let _cachedGeminiKey = null;
-const getGeminiKey = async () => {
-  if (_cachedGeminiKey) return _cachedGeminiKey;
-  
-  // Try environment variable first
-  if (process.env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY.includes("PLACEHOLDER")) {
-    _cachedGeminiKey = process.env.GEMINI_API_KEY;
-    return _cachedGeminiKey;
-  }
-
-  try {
-    const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
-    if (!secretsClient) secretsClient = new SecretsManagerClient({ region });
-    
-    const arn = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:gemini_llm-aoFcff";
-    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: arn }));
-    const secrets = JSON.parse(data.SecretString);
-    _cachedGeminiKey = secrets.gemini_api_key;
-    return _cachedGeminiKey;
-  } catch (err) {
-    console.error("Failed to fetch Gemini secret from Secrets Manager:", err.message);
-    return null;
-  }
-};
-
 const callGeminiAudio = async (text, config) => {
-  console.log("Starting Gemini Audio (Vertex AI Multimodal TTS) call...");
+  console.log("Starting Gemini Audio (Multimodal TTS) call...");
   try {
-    const credentials = await getGoogleCloudCreds(); // This will now fetch from vertexai-nE9ql9 if configured
-    if (!credentials) {
-      throw new Error("Vertex AI credentials not found.");
+    const apiKey = await getGeminiKey();
+    if (!apiKey) {
+      throw new Error("Gemini API Key not found in Secrets Manager.");
     }
 
-    const auth = new GoogleAuth({
-      credentials,
-      scopes: "https://www.googleapis.com/auth/cloud-platform",
-    });
-    const client = await auth.getClient();
-    const tokenRes = await client.getAccessToken();
-    const accessToken = tokenRes.token;
-
-    const project = credentials.project_id || process.env.VERTEX_AI_PROJECT_ID;
-    const location = process.env.VERTEX_AI_LOCATION || "us-central1";
-    const modelId = "gemini-2.0-flash-exp"; // Or gemini-2.5-flash-001 when available on Vertex
-
-    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${modelId}:generateContent`;
+    const modelId = "gemini-3.1-flash-tts-preview";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
 
     let voiceName = config?.voice_name || "Aoede";
     if (typeof voiceName === "object" && voiceName.S) {
       voiceName = voiceName.S;
     }
 
+    const speakingRate = config?.speaking_rate || 1.0;
+    const pitch = config?.pitch || 0.0;
+    let finalPrompt = text;
+
+    if (speakingRate !== 1.0 || pitch !== 0.0) {
+      let instructions = "[System Instruction: ";
+      if (speakingRate !== 1.0) instructions += `Speaking rate: ${speakingRate}x. `;
+      if (pitch !== 0.0) instructions += `Pitch: ${pitch > 0 ? 'higher' : 'lower'}. `;
+      instructions += "]\n\n";
+      finalPrompt = instructions + text;
+    }
+
     const payload = {
-      contents: [{ role: "user", parts: [{ text }] }],
+      contents: [{ parts: [{ text: finalPrompt }] }],
       generationConfig: {
         responseModalities: ["AUDIO"],
         speechConfig: {
@@ -448,30 +392,29 @@ const callGeminiAudio = async (text, config) => {
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`
+        "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Vertex AI Gemini API error: ${response.status}`, errorText);
-      throw new Error(`Vertex AI Gemini API error: ${response.status} ${errorText}`);
+      console.error(`Gemini API error: ${response.status}`, errorText);
+      throw new Error(`Gemini API error: ${response.status} ${errorText}`);
     }
 
     const json = await response.json();
     const audioPart = json.candidates?.[0]?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.includes("audio"));
-    
+
     if (!audioPart) {
       console.error("Gemini Response Body:", JSON.stringify(json));
-      throw new Error("No audio content returned from Gemini (Vertex AI).");
+      throw new Error("No audio content returned from Gemini.");
     }
 
-    console.log("Gemini Audio (Vertex AI) call successful.");
+    console.log("Gemini Audio call successful.");
     return audioPart.inlineData.data; // This is base64 string
   } catch (err) {
-    console.error("Gemini Audio (Vertex AI) request failed:", err.message);
+    console.error("Gemini Audio request failed:", err.message);
     throw err;
   }
 };
@@ -525,5 +468,6 @@ module.exports = {
   callGeminiAudio,
   getRedis,
   pickComfyApiKey,
+  getComfyApiKeys,
 };
 

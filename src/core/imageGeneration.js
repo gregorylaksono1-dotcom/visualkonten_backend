@@ -8,13 +8,25 @@ async function generateComfyUIImage(params) {
     S3_RESOURCE_BUCKET,
     dynamo, USER_REQUEST_TABLE, redis,
     uploadInputImage, submitWorkflow, uploadToS3,
-    COMFY_API_KEYS // Passed as comma-separated string
   } = params;
 
   console.log(`[Worker] Starting ComfyUI Image Generation for ${jobId}`);
   try {
+    // Pick an API Key if not provided
+    let comfyApiKey = params.comfyApiKey;
+    if (!comfyApiKey) {
+      const { pickComfyApiKey, getComfyApiKeys } = require("../services");
+      const apiKeysString = await getComfyApiKeys();
+      comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
+    }
+
+    if (!comfyApiKey) {
+        console.log(`[Worker] All ComfyUI API keys are busy. Skipping Image Gen for job ${jobId}.`);
+        return;
+    }
+
     // Upload reference image first
-    const refImageName = await uploadInputImage(currentS3ImageUrls[0], `${jobId}_ref.png`);
+    const refImageName = await uploadInputImage(currentS3ImageUrls[0], `${jobId}_ref.png`, comfyApiKey);
 
     // Load Flux workflow (need to resolve path relative to this file)
     const fluxPath = path.join(__dirname, "..", "Flux.2 [Klein] 4B Distilled_ Image Edit (API).json");
@@ -53,13 +65,6 @@ async function generateComfyUIImage(params) {
       fluxWorkflow["9"].inputs.filename_prefix = jobId;
     }
 
-    // Pick an API Key
-    const { pickComfyApiKey } = require("../services");
-    const comfyApiKey = await pickComfyApiKey(COMFY_API_KEYS, redis);
-    if (!comfyApiKey) {
-        console.log(`[Worker] All ComfyUI API keys are busy. Skipping Image Gen for job ${jobId}.`);
-        return;
-    }
 
     // Submit workflow
     const imgPromptId = await submitWorkflow(fluxWorkflow, comfyApiKey);

@@ -8,53 +8,69 @@ INPUT INFORMATION:
 
 STRICT RULES & CONSTRAINTS:
 1. IMAGE ANALYSIS & SETTING (COZY INDOOR): 
-   - Analyze the [ATTACHED IMAGE] to understand the store's vibe.
-   - Randomize the background setting but MUST be an aesthetic, cozy, "UGC Reviewer" INDOOR environment (e.g., modern cozy bedroom, bright home office desk, aesthetic living room).
+   - Analyze the [ATTACHED IMAGE] to understand the store's vibe (e.g., fashion, electronics, food, beauty).
+   - Randomize the background setting but MUST be an aesthetic, cozy, "UGC Reviewer" INDOOR environment (e.g., modern cozy bedroom, bright home office desk, aesthetic living room couch, stylish indoor cafe).
    - Generate a completely random 5-digit integer for ALL "seed" fields.
 
 2. SCRIPT STRUCTURE (ONLINE STORE PROMO & CTA): 
    - The script is spoken directly by the talent on screen.
    - Use natural, casual, everyday spoken Indonesian (e.g., "banget", "nih", "sih", "gila", "sumpah", "racun").
-   - CLOSING MUST HAVE A DIGITAL CTA: End the script inviting viewers to visit the online store.
+   - The narrative MUST focus on the experience of finding this online store, scrolling their catalog, or praising their online products.
+   - CLOSING MUST HAVE A DIGITAL CTA: End the script inviting viewers to visit the online store. Avoid platform-exclusive terms like "keranjang kuning" if possible, use general digital terms (e.g., "langsung aja kunjungi toko onlinenya!", "ceki-ceki katalognya sekarang!", "buruan klik link dan checkout!", "kepoin tokonya sekarang juga!").
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
-     * The target Indonesian speaking rate is roughly 2.5 to 3 words per second.
+     * The target Indonesian speaking rate is roughly 1.5 to 2.0 words per second.
      * You MUST calculate the exact word count required: ({video_duration} * 2.8).
-     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 40 to 45 words.
-     * SCRIPT EXPANSION (MANDATORY): If the user's input is very short, YOU MUST INVENT natural, enthusiastic filler content (e.g., browsing experience, aesthetics, promo) to FORCE the word count to reach the exact target limit. DO NOT end the script early!
+     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 22.5 to 28.5 words.
+     * Do NOT output scripts shorter than the required word count.
      * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field.
+   - CATEGORY DETECTION (BABY/KIDS): Check if {store_description} relates to babies, toddlers, or children. If yes, the voiceover script MUST be written from a warm parent's perspective (e.g., using words like "Anakku", "Bunda", "si kecil").
 
 3. TTS & GENDER MATCHING (GEMINI FLASH-TTS): 
-    - GENDER CONSISTENCY IS MANDATORY: Match visual talent and TTS voice gender.
-    - OFFICIAL GEMINI VOICE LIST: "Aoede", "Kore" (Female) | "Puck", "Charon", "Fenrir" (Male).
-    - CATEGORY DETECTION (BABY/KIDS ROUTING): If the {store_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
+    - GENDER CONSISTENCY IS MANDATORY: The visual talent and the TTS voice MUST PERFECTLY MATCH in gender.
+    - Select ONE voice from the official Gemini Multimodal Voice list below based on the product's target audience and desired vibe. (Gemini voices automatically adapt to Indonesian with high expressiveness):
+    
+    OFFICIAL GEMINI VOICE LIST:
+    - Aoede (Female): Suara hangat, lembut, profesional. Sangat cocok untuk narasi parenting, kecantikan/skincare, atau produk elegan.
+    - Kore (Female): Suara jernih, tenang, artikulasi jelas, sedikit energik. Bagus untuk review produk umum yang informatif.
+    - Puck (Male): Suara santai, ceria, energik, ala kreator konten. Sangat cocok untuk UGC kasual, gadget, atau fashion pria.
+    - Charon (Male): Suara berwibawa, berat (deep voice), meyakinkan. Cocok untuk produk premium, otomotif, atau narasi serius.
+    - Fenrir (Male): Suara standar, informatif, serba guna.
 
-4. IMAGE GENERATION LOGIC (SMARTPHONE PROP & STYLE MATCHING): 
+    MAPPING RULES:
+    - IF FEMALE PRODUCT/TALENT: MUST use "Aoede" or "Kore".
+    - IF MALE PRODUCT/TALENT: MUST use "Puck", "Charon", or "Fenrir".
+    - You can pass "speaking_rate" (e.g., 1.10) if the backend wrapper supports it.
+
+4. IMAGE GENERATION LOGIC (SMARTPHONE PROP & REVIEWER VIBE): 
    - STYLE DETECTION & LOGO FALLBACK (CRITICAL): Carefully analyze the [ATTACHED IMAGE]. 
      * If the image is a 3D animation/avatar, start the image prompt with "High quality 3D animation render, Pixar style, stylized 3D avatar". 
      * If it is a real human, start with "Authentic smartphone photo, photorealistic".
      * LOGO/OBJECT FALLBACK: If the image is a LOGO, typography, or an inanimate object (NO character present), you MUST randomly choose either a Real Human OR a 3D Animation style. Also, you MUST extract the dominant colors from the logo and apply them to the talent's clothing or background.
-   - FRAMING: MUST use "Medium shot, waist-up framing" OR "Medium full shot". STRICTLY PROHIBITED: "Close-up shot".
-   - MANDATORY PROP (SMARTPHONE/LAPTOP): The talent MUST be sitting or standing comfortably while holding a smartphone in their hand OR sitting at a desk with a laptop. 
-   - BACKGROUND TRIGGER: Append "with [describe store vibe] as aesthetic reference image" so the AI adopts the color palette of the store.
+   - FRAMING: MUST use "Medium shot, waist-up framing" OR "Medium full shot".
+   - MANDATORY PROP (SMARTPHONE/LAPTOP): The talent MUST be sitting or standing comfortably while holding a smartphone in their hand (as if reviewing an online shop) OR sitting at a desk with a laptop. 
+   - BACKGROUND TRIGGER: Integrate the vibe of the [ATTACHED IMAGE]. Append "as aesthetic reference image" to the prompt so the AI adopts the color palette or vibe of the store.
    - BABY/KIDS STORE DETECTION: If the store is dedicated to baby, toddler, or kid products:
      * IMAGE SUBJECT: The image MUST feature a "Young Indonesian [mother/father] (25-30 years old) with a warm expression". 
-     * COMPOSITION & PROP: The parent is seen interacting happily with a baby or toddler.
+     * COMPOSITION & PROP: The parent is seen interacting happily with a baby or toddler (e.g., holding the baby, or dressing the baby with items from the store). 
      * STABILITY constraint: The focus must remain clear on the adult's face.
 
-5. SINGLE SCENE LTX FORMAT (REAL-TIME, LIP-SYNC & SMILE ENDING): 
-   - CAMERA DYNAMICS: The camera MUST remain perfectly stable on a tripod. ABSOLUTELY NO ZOOMING or panning.
-   - BODY INTERACTION: Describe the talent looking directly at the camera lens the ENTIRE time holding their smartphone. 
-   - SPEED TRIGGERS: YOU MUST INCLUDE "talking with high energy, real-time normal speed, natural brisk movements". STRICTLY AVOID words like "gently", "slow", "smooth".
-   - ENDING ACTION: The talent MUST end the video with a warm, friendly smile directly at the camera.
+5. SINGLE SCENE LTX FORMAT (STABLE CAMERA, REAL-TIME SPEED & LIP-SYNC): 
+   - Generate a single "ltx_prompt" string. Remove all [visual] tags.
+   - CAMERA DYNAMICS & ACTION (STRICTLY STABLE - LIP-SYNC PRIORITY): 
+     * The camera MUST remain perfectly stable on a tripod throughout the entire video.
+     * STRICTLY FORBIDDEN: DO NOT write any instructions for zooming in, pushing in, panning, turning the body, or dynamic camera movements. Keep the framing exactly as it started.
+     * BODY INTERACTION: Describe the talent looking directly at the camera lens the ENTIRE time holding their smartphone. 
+     * SPEED TRIGGERS: YOU MUST INCLUDE "talking with high energy, real-time normal speed, natural brisk movements". STRICTLY AVOID words like "gently", "slow", "smooth", or "minimal" to prevent unwanted slow-motion effects.
    - SPECIAL HANDLING FOR BABY/KIDS STORES:
      * LIP-SYNC ENFORCEMENT: Apply the real-time lip-sync and continuous mouth movement instructions ONLY to the adult parent talent. 
      * PASSIVE SUBJECT: The baby or child must remain a passive, happy subject (smiling, sleeping, or playing naturally), NOT talking to the camera.
+   - CATEGORY DETECTION (BABY/KIDS ROUTING): If the {store_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
 
-OUTPUT FORMAT: Output ONLY a valid JSON object:
+OUTPUT FORMAT: Output ONLY a valid JSON object. No markdown code blocks. Use this exact structure:
 
 {
   "image_generation": {
-    "prompt": "[Medium shot], [Insert Detected/Randomized Visual Style e.g., High quality 3D animation render / Authentic smartphone photo] of a young Indonesian [man/woman]... sitting in [insert aesthetic indoor location]... holding a smartphone... with [store vibe description] as aesthetic reference image...",
+   "prompt": "[Medium shot], [Insert Detected/Randomized Visual Style e.g., High quality 3D animation render / Authentic smartphone photo] of a young Indonesian [man/woman]... sitting in [insert aesthetic indoor location]... ",
     "seed": [random 5-digit number]
   },
   "tts_global_config": {
@@ -64,5 +80,5 @@ OUTPUT FORMAT: Output ONLY a valid JSON object:
   },
   "tts_script": "Exact spoken text with online store CTA...",
   "tts_word_count": 42,
-  "ltx_prompt": "Amateur smartphone footage on a tripod, perfectly stable framing... [single flowing paragraph prioritizing the talent looking directly at the lens, actively talking at NORMAL REAL-TIME SPEED with high energy, moving lips continuously to match the speech, holding a smartphone naturally, and finally ending the video with a warm, friendly smile towards the camera]... A casual Indonesian voiceover says, 'Exact spoken text...'. Subtle background sound of indoor room ambiance..."
+  "ltx_prompt": "Amateur smartphone footage on a tripod, perfectly stable framing... [single flowing paragraph prioritizing the talent looking directly at the lens, actively talking at NORMAL REAL-TIME SPEED with high energy, moving lips continuously and naturally to match the speech, holding a smartphone naturally]... A casual Indonesian voiceover says, 'Exact spoken text...'. Subtle background sound of indoor room ambiance... and finally ending the video with a warm, friendly smile towards the camera"
 }

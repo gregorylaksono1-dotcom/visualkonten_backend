@@ -47,15 +47,63 @@ exports.handleGetUsage = async (event) => {
     }
   }
 
-  let items = [...byUuid.values()];
+  const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+  const { s3Client, GetObjectCommand, getSignedUrl } = require("../services");
+
+  const items = [...byUuid.values()];
   if (!items.length && !nextToken) {
-    items = await scanUserRequestsForUsage(USER_REQUEST_TABLE_NAME, candidates, sinceIso, limit);
-  } else {
-    items.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    const scanned = await scanUserRequestsForUsage(USER_REQUEST_TABLE_NAME, candidates, sinceIso, limit);
+    for (const s of scanned) byUuid.set(s.uuid, s);
   }
 
+  const finalItems = [...byUuid.values()];
+  finalItems.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+
+  const processed = await Promise.all(finalItems.slice(0, limit).map(async (it) => {
+    const row = mapUserRequestUsageRow(it);
+    
+    // Sign result_url if exists
+    if (row.result_url && !row.result_url.startsWith("http")) {
+      try {
+        row.result_url = await getSignedUrl(s3Client, new GetObjectCommand({ 
+          Bucket: S3_RESOURCE_BUCKET, 
+          Key: row.result_url 
+        }), { expiresIn: 3600 });
+      } catch (e) {}
+    }
+
+    // Sign generated_image as thumbnail_url
+    if (row.generated_image) {
+      try {
+        row.thumbnail_url = await getSignedUrl(s3Client, new GetObjectCommand({ 
+          Bucket: S3_RESOURCE_BUCKET, 
+          Key: row.generated_image 
+        }), { expiresIn: 3600 });
+      } catch (e) {}
+    }
+
+    // Sign s3_keys if exists
+    if (row.s3_keys && Array.isArray(row.s3_keys)) {
+      row.s3_keys = await Promise.all(row.s3_keys.map(async (key) => {
+        if (key && !key.startsWith("http")) {
+          try {
+            return await getSignedUrl(s3Client, new GetObjectCommand({ 
+              Bucket: S3_RESOURCE_BUCKET, 
+              Key: key 
+            }), { expiresIn: 3600 });
+          } catch (e) {
+            return key;
+          }
+        }
+        return key;
+      }));
+    }
+
+    return row;
+  }));
+
   return response(200, {
-    data: items.slice(0, limit).map(mapUserRequestUsageRow),
+    data: processed,
     next_token: lastEvaluatedKey,
   });
 };

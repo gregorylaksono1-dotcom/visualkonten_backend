@@ -500,6 +500,20 @@ Resources:
               Ref: Api
             Path: /usage
             Method: get
+        BatchStatusGet:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /jobs/status
+            Method: get
+        BatchStatusPost:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /jobs/status
+            Method: post
         GetPricing:
           Type: Api
           Properties:

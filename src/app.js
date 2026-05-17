@@ -29,6 +29,10 @@ exports.handler = async (event) => {
     if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.order_id);
     if (route === "POST /snap") return handlePostSnap(event);
     if (route === "POST /resource") return handlePostResource(event);
+    if (route === "GET /jobs/status" || route === "POST /jobs/status") {
+      const { handleBatchStatus } = require("./handlers/jobStatus");
+      return handleBatchStatus(event);
+    }
     if (route === "GET /presigned") {
       const { handleGetPresigned } = require("./handlers/resource");
       return handleGetPresigned(event);

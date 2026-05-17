@@ -67,8 +67,10 @@ async function processComfyUICompletion(params) {
   const buffer = Buffer.from(await res.arrayBuffer());
 
   // 3. Upload to S3
-  const isVideo = mediaType === "videos";
-  const folder = isVideo ? "generated_video" : "generated_image";
+  const isVideo = ["videos", "video", "gifs"].includes(mediaType) || 
+                  (output.filename && output.filename.toLowerCase().endsWith('.mp4')) || 
+                  (output.filename && output.filename.toLowerCase().endsWith('.webm'));
+  const folder = isVideo ? "generated_videos" : "generated_image";
   const ext = isVideo ? "mp4" : "png";
   const contentType = isVideo ? "video/mp4" : "image/png";
   const s3Key = `${folder}/${userId}/${jobId}.${ext}`;

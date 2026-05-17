@@ -219,16 +219,28 @@ exports.handler = async (event) => {
     };
     await redis.set(`${JOB_DETAIL_PREFIX}${jobId}`, JSON.stringify(processingDetail));
 
-    // 7. Heavy AI Processing (UGC-P) — Fire and Forget support
-    if (jobDetail.request_type === "UGC-P") {
+    // 7. Heavy AI Processing (UGC-P / UGC-S) — Fire and Forget support
+    if (jobDetail.request_type === "UGC-P" || jobDetail.request_type === "UGC-S") {
       try {
-        console.log(`[WorkerB] Processing UGC-P AI requirements for job ${jobId}`);
-        const templatePath = path.join(__dirname, "PROMPT_UGC_PRODUCT");
+        console.log(`[WorkerB] Processing ${jobDetail.request_type} AI requirements for job ${jobId}`);
+        
+        let templateFileName = "PROMPT_UGC_PRODUCT";
+        let userPromptKey = "product_description";
+
+        if (jobDetail.request_type === "UGC-S") {
+          userPromptKey = "store_description";
+          const storeType = jobDetail.store_type || "offline";
+          if (String(storeType).toLowerCase() === "online") {
+            templateFileName = "PROMPT_UGC_STORE_ONLINE";
+          } else {
+            templateFileName = "PROMPT_UGC_STORE_OFFLINE";
+          }
+        }
+
+        const templatePath = path.join(__dirname, "prompt", templateFileName);
         const template = fs.readFileSync(templatePath, "utf-8");
 
-        const orientationMap = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" };
-        const orientation = orientationMap[jobDetail.aspect_ratio] || "portrait";
-        const userPrompt = `1. {product_description}: ${jobDetail.prompt}\n2. {video_duration}: 15 detik\n3. {image_orientation}: ${orientation}`;
+        const userPrompt = `1. {${userPromptKey}}: ${jobDetail.prompt}\n2. {video_duration}: 15 detik`;
 
         const aiResponse = await callOpenAILLM(template, userPrompt);
         if (aiResponse) {

@@ -61,9 +61,18 @@ const enqueueJob = async (jobId, jobDetail) => {
   try {
     const slimDetail = {
       uuid: jobId,
-      user_email: jobDetail.user_email,
-      user_id: jobDetail.user_id,
+      user_email: jobDetail.user_email || jobDetail.userEmail,
+      user_id: jobDetail.user_id || jobDetail.userId,
       status: "PENDING",
+      request_type: jobDetail.request_type || jobDetail.requestType,
+      prompt: jobDetail.prompt,
+      video_quality: jobDetail.video_quality || jobDetail.videoQuality,
+      aspect_ratio: jobDetail.aspect_ratio || jobDetail.aspectRatio,
+      resource_family: jobDetail.resource_family || jobDetail.resourceFamily || "video",
+      s3_keys: jobDetail.s3_keys || [],
+      s3ImageUrls: jobDetail.s3ImageUrls || [],
+      ugc_mode: jobDetail.ugc_mode || null,
+      store_type: jobDetail.store_type || null,
     };
     await redis.set(`job_detail:${jobId}`, JSON.stringify(slimDetail));
     await redis.lpush("task_queue", jobId);
@@ -97,6 +106,7 @@ const invokeComfyUI = async (jobId, jobDetail) => {
     videoQuality: jobDetail.videoQuality || jobDetail.video_quality,
     aspectRatio: jobDetail.aspectRatio || jobDetail.aspect_ratio,
     s3ImageUrls,
+    store_type: jobDetail.store_type || null,
   };
 
   try {
@@ -479,10 +489,11 @@ const uploadInputAudio = async (audioUrl, filename = "input_audio.wav", apiKey) 
   const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
   const formData = new FormData();
-  formData.append("audio", new Blob([audioBuffer]), filename);
+  // ComfyUI Cloud uses the same endpoint and "image" field for all input files
+  formData.append("image", new Blob([audioBuffer]), filename);
   formData.append("overwrite", "true");
 
-  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/audio`, {
+  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
     method: "POST",
     headers: { "X-API-Key": apiKey },
     body: formData,

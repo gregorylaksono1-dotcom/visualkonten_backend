@@ -46,6 +46,7 @@ const mapUserRequestUsageRow = (item) => ({
   created_at: item.created_at,
   s3_keys: item.s3_keys ?? null,
   result_url: item.result_url ?? null,
+  generated_image: item.generated_image ?? null,
 });
 
 const parseImageBase64 = (raw) => {

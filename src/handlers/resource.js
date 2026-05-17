@@ -131,7 +131,8 @@ exports.handlePostResource = async (event) => {
     s3ImageUrls,
     s3_keys: s3Keys,
     userId,
-    ugc_mode: body.ugc_mode || null
+    ugc_mode: body.ugc_mode || null,
+    store_type: body.store_type || null
   };
   
   if (GENERATION_BACKEND === "comfyui") await invokeComfyUI(requestId, jobPayload);

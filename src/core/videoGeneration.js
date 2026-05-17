@@ -15,13 +15,23 @@ const {
  */
 async function generateComfyUIVideo(params) {
   const {
-    jobId, userEmail, userId, requestType,
-    llmResponse, audioKey, audioDuration,
-    videoQuality, aspectRatio,
+    uuid, user_email, user_id, request_type,
+    llm_response, audio, audio_duration,
+    video_quality, aspect_ratio,
     imageResultUrl, // URL from ComfyUI Flux completion
-    usedApiKey,
+    used_api_key,
     dynamo, s3, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET
   } = params;
+
+  const jobId = uuid;
+  const userEmail = user_email;
+  const userId = user_id;
+  const llmResponse = llm_response || {};
+  const audioKey = audio;
+  const audioDuration = audio_duration;
+  const videoQuality = video_quality;
+  const aspectRatio = aspect_ratio;
+  const usedApiKey = used_api_key;
 
   console.log(`[VideoGen] Triggering Video Generation for job ${jobId}...`);
 
@@ -80,10 +90,11 @@ async function generateComfyUIVideo(params) {
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET comfy_prompt_id = :vp, status = :s, updated_at = :now",
+      UpdateExpression: "SET comfy_prompt_id = :vp, #s = :status, updated_at = :now",
+      ExpressionAttributeNames: { "#s": "status" },
       ExpressionAttributeValues: { 
         ":vp": videoPromptId,
-        ":s": "PROCESSING",
+        ":status": "PROCESSING",
         ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
       }
     }));

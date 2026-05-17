@@ -140,15 +140,27 @@ const handleSubmission = async (event) => {
   }
 
   // 3. Process Heavy AI Requirements (LLM & Gemini)
-  if (requestType === "UGC-P") {
+  if (requestType === "UGC-P" || requestType === "UGC-S") {
     try {
-      console.log(`[Worker] Processing UGC-P AI requirements for job ${jobId}`);
-      const templatePath = path.join(__dirname, "PROMPT_UGC_PRODUCT");
+      console.log(`[Worker] Processing ${requestType} AI requirements for job ${jobId}`);
+
+      let templateFileName = "PROMPT_UGC_PRODUCT";
+      let userPromptKey = "product_description";
+
+      if (requestType === "UGC-S") {
+        userPromptKey = "store_description";
+        const storeType = event.store_type || "offline";
+        if (String(storeType).toLowerCase() === "online") {
+          templateFileName = "PROMPT_UGC_STORE_ONLINE";
+        } else {
+          templateFileName = "PROMPT_UGC_STORE_OFFLINE";
+        }
+      }
+
+      const templatePath = path.join(__dirname, "prompt", templateFileName);
       const template = fs.readFileSync(templatePath, "utf-8");
 
-      const orientationMap = { "9:16": "portrait", "16:9": "landscape", "1:1": "square" };
-      const orientation = orientationMap[aspectRatio] || "portrait";
-      const userPrompt = `1. {product_description}: ${prompt}\n2. {video_duration}: 15 detik\n3. {image_orientation}: ${orientation}`;
+      const userPrompt = `1. {${userPromptKey}}: ${prompt}\n2. {video_duration}: 15 detik`;
 
       const aiResponse = await callOpenAILLM(template, userPrompt);
       if (aiResponse) {
@@ -210,48 +222,6 @@ const handleSubmission = async (event) => {
     }
   }
 
-  // 4. Dev Simulation for Video
-  if (isDev) {
-    console.log(`[Dev Dummy] Simulating LTX Video generation for ${jobId}`);
-    await updateDynamoStatus(jobId, userEmail, "PROCESSING", { comfyPromptId: `dummy-${jobId}` });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const dummyUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
-    await updateDynamoStatus(jobId, userEmail, "COMPLETED", { resultUrl: dummyUrl });
-
-    // Manual decrement for Video part slot
-    try {
-      const redisKey = `comfyui_job_${comfyApiKey}`;
-      await redis.decr(redisKey);
-    } catch (e) { }
-
-    return;
-  }
-
-  // 5. Submit Video Generation (LTX)
-  try {
-    const imageUrls = currentS3ImageUrls;
-    const uploadedFiles = {};
-    for (let i = 0; i < imageUrls.length; i++) {
-      const key = `image${i + 1}`;
-      uploadedFiles[key] = await uploadInputImage(imageUrls[i], `${jobId}_${key}.png`, comfyApiKey);
-    }
-
-    const workflow = buildWorkflow(requestType, { prompt: finalJobPrompt, videoQuality, aspectRatio, uploadedFiles });
-    const promptId = await submitWorkflow(workflow, comfyApiKey);
-
-    await updateDynamoStatus(jobId, userEmail, "PROCESSING", {
-      comfyPromptId: promptId,
-      usedApiKey: comfyApiKey
-    });
-  } catch (err) {
-    console.error(`[Submitter] Error job ${jobId}:`, err.message);
-    await updateDynamoStatus(jobId, userEmail, "FAILED");
-    // Decrement on failure
-    try {
-      const redisKey = `comfyui_job_${comfyApiKey}`;
-      await redis.decr(redisKey);
-    } catch (e) { }
-  }
 };
 
 // ─── Main Handler ────────────────────────────────────────────────────────────

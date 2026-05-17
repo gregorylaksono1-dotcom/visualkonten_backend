@@ -28,6 +28,8 @@ STRICT RULES & CONSTRAINTS:
      * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 22.5 to 28.5 words.
      * Do NOT output scripts shorter than the required word count.
      * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field.
+   - CATEGORY DETECTION (BABY/KIDS): Check if {store_description} relates to babies, toddlers, or children. If yes, the voiceover script MUST be written from a warm parent's perspective (e.g., using words like "Anakku", "Bunda", "si kecil").
+
 3. TTS & GENDER MATCHING (GEMINI FLASH-TTS): 
     - GENDER CONSISTENCY IS MANDATORY: The visual talent and the TTS voice MUST PERFECTLY MATCH in gender.
     - Select ONE voice from the official Gemini Multimodal Voice list below based on the product's target audience and desired vibe. (Gemini voices automatically adapt to Indonesian with high expressiveness):
@@ -48,6 +50,10 @@ STRICT RULES & CONSTRAINTS:
    - FRAMING: MUST use "Medium shot, waist-up framing" OR "Medium full shot". STRICTLY PROHIBITED: DO NOT use "Close-up shot".
    - MANDATORY PROP (SMARTPHONE/LAPTOP): The talent MUST be sitting or standing comfortably while holding a smartphone in their hand (as if reviewing an online shop) OR sitting at a desk with a laptop. 
    - BACKGROUND TRIGGER: Integrate the vibe of the [ATTACHED IMAGE]. Append "as aesthetic reference image" to the prompt so the AI adopts the color palette or vibe of the store.
+   - BABY/KIDS STORE DETECTION: If the store is dedicated to baby, toddler, or kid products:
+     * IMAGE SUBJECT: The image MUST feature a "Young Indonesian [mother/father] (25-30 years old) with a warm expression". 
+     * COMPOSITION & PROP: The parent is seen interacting happily with a baby or toddler (e.g., holding the baby, or dressing the baby with items from the store). 
+     * STABILITY constraint: The focus must remain clear on the adult's face.
 
 5. SINGLE SCENE LTX FORMAT (STABLE CAMERA, REAL-TIME SPEED & LIP-SYNC): 
    - Generate a single "ltx_prompt" string. Remove all [visual] tags.
@@ -56,6 +62,10 @@ STRICT RULES & CONSTRAINTS:
      * STRICTLY FORBIDDEN: DO NOT write any instructions for zooming in, pushing in, panning, turning the body, or dynamic camera movements. Keep the framing exactly as it started.
      * BODY INTERACTION: Describe the talent looking directly at the camera lens the ENTIRE time holding their smartphone. 
      * SPEED TRIGGERS: YOU MUST INCLUDE "talking with high energy, real-time normal speed, natural brisk movements". STRICTLY AVOID words like "gently", "slow", "smooth", or "minimal" to prevent unwanted slow-motion effects.
+   - SPECIAL HANDLING FOR BABY/KIDS STORES:
+     * LIP-SYNC ENFORCEMENT: Apply the real-time lip-sync and continuous mouth movement instructions ONLY to the adult parent talent. 
+     * PASSIVE SUBJECT: The baby or child must remain a passive, happy subject (smiling, sleeping, or playing naturally), NOT talking to the camera.
+    - CATEGORY DETECTION (BABY/KIDS ROUTING): If the {store_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
 
 OUTPUT FORMAT: Output ONLY a valid JSON object. No markdown code blocks. Use this exact structure:
 

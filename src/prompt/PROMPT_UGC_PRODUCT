@@ -38,9 +38,11 @@ STRICT RULES & CONSTRAINTS:
     - IF FEMALE PRODUCT/TALENT: MUST use "Aoede" or "Kore".
     - IF MALE PRODUCT/TALENT: MUST use "Puck", "Charon", or "Fenrir".
     - You can pass "speaking_rate" (e.g., 1.10) if the backend wrapper supports it.
+    
+    CATEGORY DETECTION (BABY/KIDS ROUTING): 
+    - If the {product_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
 
 4. IMAGE GENERATION LOGIC (DYNAMIC FRAMING & ORIENTATION): 
-
    - STRICT PROHIBITION (NO BRANDS & NO META TAGS): In the image prompt, you MUST NOT explicitly state the brand name, exact model, or use instructional phrases like "as reference image". Call the product generically (e.g., "the shirt from the reference", "the electronic device from the reference", "the skincare bottle from the reference"). Let the AI engine pull the visual data entirely from the subject reference image provided in the backend pipeline. DO NOT use "Close-up shot" or tight face framing under any circumstances.
    - IF FASHION/APPAREL:
      * MUST use "Full body shot, wide framing" to show the complete outfit and styling.

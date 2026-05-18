@@ -15,9 +15,10 @@ exports.handleGetCredit = async (event) => {
     return response(401, { error: "Unauthorized: missing email claim." });
   }
 
-  // 1. Fetch live balance & usage from the Profile Table
+  // 1. Fetch live balance, usage & email from the Profile Table
   let liveBalance = 0;
   let liveUsage = 0;
+  let profileEmail = "";
 
   if (userId) {
     try {
@@ -31,18 +32,20 @@ exports.handleGetCredit = async (event) => {
       if (profileItem) {
         liveBalance = Number(profileItem.credit_balance ?? 0);
         liveUsage = Number(profileItem.credit_usage ?? 0);
+        profileEmail = profileItem.email || "";
       }
     } catch (err) {
       console.error("Error fetching live profile balance:", err);
     }
   }
 
+  const targetEmail = profileEmail || userEmail;
   const qsp = event.queryStringParameters || {};
 
   // 2. Handle spent_total_only requested by HistoriPembayaran.tsx
   if (String(qsp.spent_total_only || "") === "1") {
     try {
-      const spent_success_total = await sumSuccessfulSpending(userEmail);
+      const spent_success_total = await sumSuccessfulSpending(targetEmail);
       return response(200, {
         data: [],
         usage: liveUsage,
@@ -87,7 +90,7 @@ exports.handleGetCredit = async (event) => {
           IndexName: TOPUP_CREDIT_USER_EMAIL_INDEX,
           KeyConditionExpression: "user_email = :email",
           ExpressionAttributeValues: {
-            ":email": userEmail,
+            ":email": targetEmail,
           },
           ScanIndexForward: false,
           Limit: requestedLimit,
@@ -99,7 +102,7 @@ exports.handleGetCredit = async (event) => {
         resNextToken = Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString("base64");
       }
     } else {
-      const paged = await queryCreditHistoryPaged(userEmail, filterParts, requestedLimit, 50, 10, startKey);
+      const paged = await queryCreditHistoryPaged(targetEmail, filterParts, requestedLimit, 50, 10, startKey);
       items = paged.items || [];
       if (paged.lastEvaluatedKey) {
         resNextToken = Buffer.from(JSON.stringify(paged.lastEvaluatedKey)).toString("base64");
@@ -109,20 +112,15 @@ exports.handleGetCredit = async (event) => {
     console.error("Error querying credit history:", err);
   }
 
-  // 4. Return dual-compatible payload
+  // 4. Return dual-compatible flat payload
   return response(200, {
-    // legacy flat format (Dashboard.tsx)
     data: items,
     balance: liveBalance,
     usage: liveUsage,
-
-    // new nested format (HistoriPembayaran.tsx)
-    data: {
-      user_email: userEmail,
-      credit_balance: liveBalance,
-      credit_usage: liveUsage,
-      history: items,
-      next_token: resNextToken,
-    },
+    user_email: targetEmail,
+    credit_balance: liveBalance,
+    credit_usage: liveUsage,
+    history: items,
+    next_token: resNextToken,
   });
 };

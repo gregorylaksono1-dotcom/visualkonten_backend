@@ -11,8 +11,10 @@ const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET;
 const IMAGE_PROMPT_ID_INDEX = process.env.IMAGE_PROMPT_ID_INDEX;
 const VIDEO_PROMPT_ID_INDEX = process.env.VIDEO_PROMPT_ID_INDEX;
 
+const S3_REGION = process.env.S3_RESOURCE_BUCKET_REGION || (S3_RESOURCE_BUCKET === "visualkonten" ? "us-east-2" : REGION);
+
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
-const s3 = new S3Client({ region: REGION });
+const s3 = new S3Client({ region: S3_REGION });
 
 /**
  * Handler for catching ComfyUI Cloud result/webhook.

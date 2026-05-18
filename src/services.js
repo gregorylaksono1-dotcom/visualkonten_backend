@@ -22,7 +22,11 @@ const { parseCreditsFromPricingItem, buildCreditStatusFilterParts } = require(".
 const region = process.env.AWS_REGION || "ap-southeast-1";
 const client = new DynamoDBClient({ region });
 const docClient = DynamoDBDocumentClient.from(client);
-const s3Client = new S3Client({ region });
+
+const bucketName = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+const s3Region = process.env.S3_RESOURCE_BUCKET_REGION || (bucketName === "visualkonten" ? "us-east-2" : region);
+const s3Client = new S3Client({ region: s3Region });
+
 const lambdaClient = new LambdaClient({ region });
 let secretsClient = null; // Lazy init
 
@@ -34,7 +38,7 @@ const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const MIDTRANS_API_URL = process.env.MIDTRANS_API_URL;
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
-const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+const S3_RESOURCE_BUCKET = bucketName;
 
 // Redis Singleton
 let _redis;

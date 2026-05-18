@@ -26,7 +26,7 @@ exports.handler = async (event) => {
     if (route === "GET /credit") return handleGetCredit(event);
     if (route === "GET /usage") return handleGetUsage(event);
     if (route.startsWith("GET /pricing/")) return handleGetPricing(event, pathParameters.key);
-    if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.order_id);
+    if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.orderId || pathParameters.order_id);
     if (route === "POST /snap") return handlePostSnap(event);
     if (route === "POST /resource") return handlePostResource(event);
     if (route === "GET /jobs/status" || route === "POST /jobs/status") {

@@ -5,13 +5,17 @@ const TOPUP_CREDIT_TABLE_NAME = process.env.TOPUP_CREDIT_TABLE_NAME;
 const MIDTRANS_FINISH_CALLBACK_URL = process.env.MIDTRANS_FINISH_CALLBACK_URL;
 
 exports.handleGetTopup = async (event, topupOrderId) => {
-  const userEmail = getClaims(event).email;
+  const claims = getClaims(event);
+  const userEmail = claims.email || claims["cognito:username"] || claims.username;
   if (!userEmail) return response(401, { error: "Unauthorized: missing email claim." });
 
   const decodedId = decodeURIComponent(String(topupOrderId));
   const res = await docClient.send(new QueryCommand({
     TableName: TOPUP_CREDIT_TABLE_NAME,
-    KeyConditionExpression: "uuid = :orderId",
+    KeyConditionExpression: "#uuid = :orderId",
+    ExpressionAttributeNames: {
+      "#uuid": "uuid",
+    },
     ExpressionAttributeValues: { ":orderId": decodedId },
   }));
   const item = res.Items?.[0];

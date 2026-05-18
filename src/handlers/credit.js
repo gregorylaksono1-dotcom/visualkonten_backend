@@ -1,13 +1,72 @@
-const { response, getClaims, buildCreditStatusFilterParts } = require("../utils");
-const { getLatestCreditMetrics, queryCreditHistoryPaged } = require("../services");
+const { response, getClaims, buildCreditStatusFilterParts, normalizeUserEmail } = require("../utils");
+const { queryCreditHistoryPaged, sumSuccessfulSpending } = require("../services");
+const { docClient, QueryCommand } = require("../services");
+
+const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
+const TOPUP_CREDIT_TABLE_NAME = process.env.TOPUP_CREDIT_TABLE_NAME;
+const TOPUP_CREDIT_USER_EMAIL_INDEX = process.env.TOPUP_CREDIT_USER_EMAIL_INDEX;
 
 exports.handleGetCredit = async (event) => {
-  const userEmail = getClaims(event).email;
-  if (!userEmail) return response(401, { error: "Unauthorized: missing email." });
+  const claims = getClaims(event);
+  const userEmail = claims.email || claims["cognito:username"] || claims.username;
+  const userId = claims.sub;
+
+  if (!userEmail) {
+    return response(401, { error: "Unauthorized: missing email claim." });
+  }
+
+  // 1. Fetch live balance & usage from the Profile Table
+  let liveBalance = 0;
+  let liveUsage = 0;
+
+  if (userId) {
+    try {
+      const profileRes = await docClient.send(new QueryCommand({
+        TableName: PROFILE_TABLE_NAME,
+        KeyConditionExpression: "user_id = :userId",
+        ExpressionAttributeValues: { ":userId": userId },
+        Limit: 1,
+      }));
+      const profileItem = profileRes.Items?.[0];
+      if (profileItem) {
+        liveBalance = Number(profileItem.credit_balance ?? 0);
+        liveUsage = Number(profileItem.credit_usage ?? 0);
+      }
+    } catch (err) {
+      console.error("Error fetching live profile balance:", err);
+    }
+  }
 
   const qsp = event.queryStringParameters || {};
-  const statusGroup = qsp.status || "all";
-  const limit = Math.min(Number(qsp.limit || 50), 200);
+
+  // 2. Handle spent_total_only requested by HistoriPembayaran.tsx
+  if (String(qsp.spent_total_only || "") === "1") {
+    try {
+      const spent_success_total = await sumSuccessfulSpending(userEmail);
+      return response(200, {
+        data: [],
+        usage: liveUsage,
+        balance: liveBalance,
+        spent_success_total,
+      });
+    } catch (err) {
+      console.error("Error summing successful spending:", err);
+      return response(500, { error: "Failed to load spent total." });
+    }
+  }
+
+  // 3. Fetch Topup & Credit History
+  const statusGroup = String(qsp.status || "all").toLowerCase();
+  const limitRaw = qsp.limit != null ? Number(qsp.limit) : NaN;
+  const hasExplicitLimit = Number.isFinite(limitRaw);
+  const requestedLimit = hasExplicitLimit
+    ? Math.min(500, Math.max(1, Math.floor(limitRaw)))
+    : statusGroup !== "all"
+      ? 200
+      : 20;
+
+  const wantsExtendedHistory = hasExplicitLimit || statusGroup !== "all";
+  const filterParts = buildCreditStatusFilterParts(statusGroup);
   const nextToken = qsp.next_token;
 
   let startKey = null;
@@ -17,20 +76,52 @@ exports.handleGetCredit = async (event) => {
     } catch (e) {}
   }
 
-  const metrics = await getLatestCreditMetrics(userEmail);
-  const filter = buildCreditStatusFilterParts(statusGroup);
-  const paged = await queryCreditHistoryPaged(userEmail, filter, limit, 50, 10, startKey);
+  let items = [];
+  let resNextToken = null;
 
-  const resNextToken = paged.lastEvaluatedKey 
-    ? Buffer.from(JSON.stringify(paged.lastEvaluatedKey)).toString("base64")
-    : null;
+  try {
+    if (!wantsExtendedHistory && statusGroup === "all") {
+      const result = await docClient.send(
+        new QueryCommand({
+          TableName: TOPUP_CREDIT_TABLE_NAME,
+          IndexName: TOPUP_CREDIT_USER_EMAIL_INDEX,
+          KeyConditionExpression: "user_email = :email",
+          ExpressionAttributeValues: {
+            ":email": userEmail,
+          },
+          ScanIndexForward: false,
+          Limit: requestedLimit,
+          ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+        })
+      );
+      items = result.Items || [];
+      if (result.LastEvaluatedKey) {
+        resNextToken = Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString("base64");
+      }
+    } else {
+      const paged = await queryCreditHistoryPaged(userEmail, filterParts, requestedLimit, 50, 10, startKey);
+      items = paged.items || [];
+      if (paged.lastEvaluatedKey) {
+        resNextToken = Buffer.from(JSON.stringify(paged.lastEvaluatedKey)).toString("base64");
+      }
+    }
+  } catch (err) {
+    console.error("Error querying credit history:", err);
+  }
 
+  // 4. Return dual-compatible payload
   return response(200, {
+    // legacy flat format (Dashboard.tsx)
+    data: items,
+    balance: liveBalance,
+    usage: liveUsage,
+
+    // new nested format (HistoriPembayaran.tsx)
     data: {
       user_email: userEmail,
-      credit_balance: metrics.balance,
-      credit_usage: metrics.usage,
-      history: paged.items,
+      credit_balance: liveBalance,
+      credit_usage: liveUsage,
+      history: items,
       next_token: resNextToken,
     },
   });

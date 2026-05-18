@@ -158,11 +158,12 @@ const scanUserRequestsForUsage = async (tableName, emails, sinceIso, maxItems) =
   let pages = 0;
   while (collected.length < maxItems && pages < 20) {
     pages++;
-    const res = await docClient.send(new ScanCommand({
+    const scanParams = {
       TableName: tableName,
-      ExclusiveStartKey: exclusiveStartKey,
       Limit: 200,
-    }));
+    };
+    if (exclusiveStartKey) scanParams.ExclusiveStartKey = exclusiveStartKey;
+    const res = await docClient.send(new ScanCommand(scanParams));
     for (const item of res.Items || []) {
       const ue = String(item.user_email || "").trim().toLowerCase();
       if (!emailSet.has(ue)) continue;
@@ -194,8 +195,8 @@ const queryCreditHistoryPaged = async (userEmail, filterParts, maxItems, pageSiz
       ExpressionAttributeValues: { ":email": userEmail, ...(filterParts?.ExpressionAttributeValues || {}) },
       ScanIndexForward: false,
       Limit: pageSize,
-      ExclusiveStartKey: exclusiveStartKey,
     };
+    if (exclusiveStartKey) params.ExclusiveStartKey = exclusiveStartKey;
     if (filterParts?.FilterExpression) params.FilterExpression = filterParts.FilterExpression;
     if (filterParts?.ExpressionAttributeNames) params.ExpressionAttributeNames = filterParts.ExpressionAttributeNames;
     const res = await docClient.send(new QueryCommand(params));
@@ -266,7 +267,7 @@ const uploadToS3 = async (bucket, key, buffer, contentType) => {
   }));
 };
 
-const MAIN_SECRET_ARN = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q";
+const DEFAULT_SECRET_ARN = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q";
 
 let _cachedSecrets = null;
 const getSecrets = async () => {
@@ -274,7 +275,11 @@ const getSecrets = async () => {
   try {
     const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
     if (!secretsClient) secretsClient = new SecretsManagerClient({ region });
-    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: MAIN_SECRET_ARN }));
+    
+    const secretArn = process.env.MAIN_SECRET_ARN || DEFAULT_SECRET_ARN;
+    console.log(`[SecretsManager] Fetching consolidated secrets from: ${secretArn}`);
+    
+    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
     _cachedSecrets = JSON.parse(data.SecretString);
     return _cachedSecrets;
   } catch (err) {
@@ -580,6 +585,7 @@ module.exports = {
   createMidtransSnapTransaction,
   uploadToS3,
   callOpenAILLM,
+  getOpenAiKey,
   callGeminiAudio,
   getRedis,
   pickComfyApiKey,

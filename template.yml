@@ -129,6 +129,10 @@ Parameters:
     Type: String
     Description: API Key untuk Google Gemini 2.5 Flash (Audio/TTS)
     Default: PLACEHOLDER_GEMINI_API_KEY
+  MainSecretArn:
+    Type: String
+    Description: ARN for consolidated AWS Secrets Manager secret
+    Default: arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -447,9 +451,11 @@ Resources:
           Action:
           - secretsmanager:GetSecretValue
           Resource:
-          - arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q
+          - Ref: MainSecretArn
       Environment:
         Variables:
+          MAIN_SECRET_ARN:
+            Ref: MainSecretArn
           PROFILE_TABLE_NAME:
             Ref: ProfileTable
           TOPUP_CREDIT_TABLE_NAME:
@@ -630,9 +636,11 @@ Resources:
           Action:
           - secretsmanager:GetSecretValue
           Resource:
-          - arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q
+          - Ref: MainSecretArn
       Environment:
         Variables:
+          MAIN_SECRET_ARN:
+            Ref: MainSecretArn
           UPSTASH_REDIS_REST_URL:
             Ref: UpstashRedisRestUrl
           UPSTASH_REDIS_REST_TOKEN:
@@ -757,9 +765,11 @@ Resources:
           Action:
           - secretsmanager:GetSecretValue
           Resource:
-          - arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q
+          - Ref: MainSecretArn
       Environment:
         Variables:
+          MAIN_SECRET_ARN:
+            Ref: MainSecretArn
           USER_REQUEST_TABLE_NAME:
             Ref: UserRequestTable
           STATUS_CREATED_INDEX_NAME: StatusCreatedIndex

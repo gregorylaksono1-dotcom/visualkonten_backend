@@ -19,9 +19,11 @@ const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand } = requ
 const { buildWorkflow } = require("./workflows");
 const { 
   callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey,
-  uploadInputImage, submitWorkflow, getOutputUrl, resolveSignedUrl
+  uploadInputImage, submitWorkflow, getOutputUrl, resolveSignedUrl,
+  s3Client
 } = require("./services");
 const { generateComfyUIImage } = require("./core/imageGeneration");
+const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
 const fs = require("fs");
 const path = require("path");
@@ -177,8 +179,9 @@ const handleSubmission = async (event) => {
           }));
 
           // Trigger Gemini TTS
+          let ttsResult = null;
           if (llmResponse.tts_script && llmResponse.tts_global_config) {
-            await generateTTS({
+            ttsResult = await generateTTS({
               jobId,
               userEmail,
               userId: event.userId,
@@ -190,27 +193,53 @@ const handleSubmission = async (event) => {
               uploadToS3
             });
           }
-          // Trigger ComfyUI Image Generation (Flux.2)
+
+          // Flag to switch between OpenAI and Flux Image Generation
+          const USE_OPENAI_IMAGE_GEN = true;
+
           if (currentS3ImageUrls.length > 0) {
-            await generateComfyUIImage({
-              jobId,
-              userEmail,
-              userId: event.userId,
-              currentS3ImageUrls,
-              llmResponse,
-              finalJobPrompt,
-              videoQuality,
-              aspectRatio,
-              S3_RESOURCE_BUCKET,
-              dynamo,
-              USER_REQUEST_TABLE,
-              uploadInputImage,
-              submitWorkflow,
-              getOutputUrl,
-              uploadToS3,
-              redis,
-              comfyApiKey // Reusing the same key picked above
-            });
+            if (USE_OPENAI_IMAGE_GEN) {
+              // Trigger OpenAI Image Generation + Video Generation Pipeline
+              await generateImageOpenAI({
+                jobId,
+                userEmail,
+                userId: event.userId,
+                currentS3ImageUrls,
+                llmResponse,
+                finalJobPrompt,
+                videoQuality,
+                aspectRatio,
+                S3_RESOURCE_BUCKET,
+                dynamo,
+                s3: s3Client,
+                USER_REQUEST_TABLE,
+                comfyApiKey,
+                audio: ttsResult?.audioS3Key || null,
+                audioDuration: ttsResult?.duration || null,
+                requestType
+              });
+            } else {
+              // Trigger ComfyUI Image Generation (Flux.2)
+              await generateComfyUIImage({
+                jobId,
+                userEmail,
+                userId: event.userId,
+                currentS3ImageUrls,
+                llmResponse,
+                finalJobPrompt,
+                videoQuality,
+                aspectRatio,
+                S3_RESOURCE_BUCKET,
+                dynamo,
+                USER_REQUEST_TABLE,
+                uploadInputImage,
+                submitWorkflow,
+                getOutputUrl,
+                uploadToS3,
+                redis,
+                comfyApiKey // Reusing the same key picked above
+              });
+            }
           }
 
         } catch (e) {

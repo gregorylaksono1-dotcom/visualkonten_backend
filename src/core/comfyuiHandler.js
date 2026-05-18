@@ -110,8 +110,10 @@ async function processComfyUICompletion(params) {
   }));
 
   // 5. Pipeline Logic
-  // If it was an Image job and requestType is UGC-P, trigger Video Gen
-  if (isImageJob && !isVideo && job.request_type === "UGC-P") {
+  // Flag to trigger video generation from webhook (deactivated as we now trigger it directly after OpenAI image gen)
+  const TRIGGER_VIDEO_FROM_WEBHOOK = false;
+
+  if (TRIGGER_VIDEO_FROM_WEBHOOK && isImageJob && !isVideo && job.request_type === "UGC-P") {
     await generateComfyUIVideo({
       ...job,
       imageResultUrl: resultUrl,

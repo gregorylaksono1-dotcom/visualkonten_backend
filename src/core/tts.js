@@ -74,6 +74,7 @@ async function generateTTS(params) {
           ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
         }
       }));
+      return { audioS3Key, duration };
     }
   } catch (ttsErr) {
     console.error("[Worker] TTS processing error:", ttsErr);

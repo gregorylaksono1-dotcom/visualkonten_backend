@@ -1,6 +1,7 @@
 const { response, getClaims, normalizeUserEmail, parseBody, generateFriendlyOrderId, formatMidtransStartTime, pickEnabledPaymentsByNominal } = require("../utils");
 const { docClient, QueryCommand, PutCommand, createMidtransSnapTransaction } = require("../services");
 
+const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
 const TOPUP_CREDIT_TABLE_NAME = process.env.TOPUP_CREDIT_TABLE_NAME;
 const MIDTRANS_FINISH_CALLBACK_URL = process.env.MIDTRANS_FINISH_CALLBACK_URL;
 
@@ -23,7 +24,32 @@ exports.handleGetTopup = async (event, topupOrderId) => {
   if (normalizeUserEmail(item.user_email) !== normalizeUserEmail(userEmail)) {
     return response(403, { error: "Access denied." });
   }
-  return response(200, { data: item });
+
+  let creditBalance = null;
+  const userIdFromTopup = String(item.user_id || "").trim();
+  if (userIdFromTopup) {
+    try {
+      const profileResult = await docClient.send(
+        new QueryCommand({
+          TableName: PROFILE_TABLE_NAME,
+          KeyConditionExpression: "user_id = :userId",
+          ExpressionAttributeValues: {
+            ":userId": userIdFromTopup,
+          },
+          Limit: 1,
+        })
+      );
+      const profileItem = profileResult.Items?.[0] || null;
+      if (profileItem?.credit_balance !== undefined && profileItem?.credit_balance !== null) {
+        const n = Number(profileItem.credit_balance);
+        creditBalance = Number.isFinite(n) ? n : null;
+      }
+    } catch (err) {
+      console.error("Error fetching credit balance for topup response:", err);
+    }
+  }
+
+  return response(200, { data: { ...item, credit_balance: creditBalance } });
 };
 
 exports.handlePostSnap = async (event) => {

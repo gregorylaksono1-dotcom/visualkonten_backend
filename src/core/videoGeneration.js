@@ -90,11 +90,12 @@ async function generateComfyUIVideo(params) {
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET comfy_prompt_id = :vp, #s = :status, updated_at = :now",
+      UpdateExpression: "SET comfy_prompt_id = :vp, #s = :status, used_api_key = :uak, updated_at = :now",
       ExpressionAttributeNames: { "#s": "status" },
       ExpressionAttributeValues: { 
         ":vp": videoPromptId,
         ":status": "PROCESSING",
+        ":uak": usedApiKey || null,
         ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
       }
     }));

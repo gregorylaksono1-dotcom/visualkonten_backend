@@ -1,0 +1,104 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "BikinAi-backend-dev"
+resolve_s3 = true
+s3_prefix = "BikinAi-backend-dev"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = """
+EnvironmentSuffix="-dev" \
+ApiStageName="dev" \
+CognitoDomainPrefix="bikinai-auth-dev-9022" \
+GoogleClientId="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_id}}" \
+GoogleClientSecret="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_secret}}" \
+MidtransServerKey="{{resolve:secretsmanager:VisualKonten:SecretString:midtrans_server_key}}" \
+MidtransApiUrl="https://app.sandbox.midtrans.com/snap/v1/transactions" \
+MidtransFinishCallbackUrl="https://bkn-ai-dashboard.vercel.app/confirmation-payment" \
+UpstashRedisRestUrl="https://talented-griffon-88058.upstash.io/" \
+UpstashRedisRestToken="gQAAAAAAAVf6AAIgcDI2OGNlMzY2OGY1MDY0MDVlOWRlMjU3M2VkZmZkNzdlYw" \
+QStashToken="eyJVc2VySUQiOiI0OGRmMzEwYi0zNzMzLTQzYTUtYTBjMi0yOWVjZDg0MzAyZWQiLCJQYXNzd29yZCI6IjA1MGUxNzg1YTc1NjQ2ZGRiMGFlYjcxZGQ3NzQ0YTYyIn0=" \
+WorkerBQStashUrl="https://xayhmg0s7b.execute-api.ap-southeast-1.amazonaws.com/dev/worker-b" \
+WorkerCUrl="https://xayhmg0s7b.execute-api.ap-southeast-1.amazonaws.com/dev/worker-c" \
+RunPodApiKey="PLACEHOLDER_RUNPOD_API_KEY" \
+RunPodEndpointId="PLACEHOLDER_RUNPOD_ENDPOINT_ID" \
+WorkerUrls="https://xayhmg0s7b.execute-api.ap-southeast-1.amazonaws.com/dev/dummy-worker" \
+MaxActiveSlots="2" \
+GenerationBackend="comfyui" \
+S3ResourceBucketName="dapurartisan" \
+ComfyMaxConcurrentJobs="1" \
+GeminiApiKey="{{resolve:secretsmanager:VisualKonten:SecretString:gemini_api_key}}" \
+MainSecretArn="arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q" \
+"""
+
+[sandbox.deploy.parameters]
+stack_name = "BikinAi-backend-sbx"
+resolve_s3 = true
+s3_prefix = "BikinAi-backend-sbx"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = """
+EnvironmentSuffix="-sbx" \
+ApiStageName="sbx" \
+CognitoDomainPrefix="bikinai-auth-sbx-9021" \
+FrontendCallbackUrl="https://dashboard-visualkonten-git-sandbox-greglaksono-2328s-projects.vercel.app/dashboard" \
+FrontendLogoutUrl="https://dashboard-visualkonten-git-sandbox-greglaksono-2328s-projects.vercel.app/" \
+S3ResourceBucketName="dapurartisan-sbx" \
+MidtransApiUrl="https://app.sandbox.midtrans.com/snap/v1/transactions" \
+MidtransFinishCallbackUrl="https://dashboard-visualkonten-git-sandbox-greglaksono-2328s-projects.vercel.app/confirmation-payment" \
+GoogleClientId="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_id}}" \
+GoogleClientSecret="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_secret}}" \
+MidtransServerKey="{{resolve:secretsmanager:VisualKonten:SecretString:midtrans_server_key}}" \
+UpstashRedisRestUrl="https://talented-griffon-88058.upstash.io" \
+UpstashRedisRestToken="gQAAAAAAAVf6AAIgcDI2OGNlMzY2OGY1MDY0MDVlOWRlMjU3M2VkZmZkNzdlYw" \
+QStashToken="PLACEHOLDER_QSTASH_TOKEN" \
+WorkerBQStashUrl="PLACEHOLDER_WORKER_B_URL_SBX" \
+WorkerCUrl="PLACEHOLDER_WORKER_C_URL_SBX" \
+RunPodApiKey="PLACEHOLDER_RUNPOD_API_KEY" \
+RunPodEndpointId="PLACEHOLDER_RUNPOD_ENDPOINT_ID" \
+WorkerUrls="PLACEHOLDER_WORKER_URLS_SBX" \
+MaxActiveSlots="2" \
+ComfyMaxConcurrentJobs="1" \
+GenerationBackend="comfyui" \
+GeminiApiKey="{{resolve:secretsmanager:VisualKonten:SecretString:gemini_api_key}}" \
+"""
+
+[production.deploy.parameters]
+stack_name = "BikinAi-backend-prod"
+resolve_s3 = true
+s3_prefix = "BikinAi-backend-prod"
+region = "ap-southeast-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = """
+EnvironmentSuffix="-prod" \
+ApiStageName="prod" \
+CognitoDomainPrefix="bikinai-auth-prod-9021" \
+CognitoCustomDomainHostname="auth.visualkonten.com" \
+CognitoCustomDomainCertificateArn="arn:aws:acm:us-east-1:020576990105:certificate/cc85e2c3-0bb9-4bdf-b7b5-4e7007750477" \
+ProvisionCognitoUserPoolDomain="true" \
+FrontendCallbackUrl="https://app.visualkonten.com/dashboard" \
+FrontendLogoutUrl="https://app.visualkonten.com/" \
+S3ResourceBucketName="visualkonten-020576990105-ap-southeast-1-an" \
+MidtransApiUrl="https://app.midtrans.com/snap/v1/transactions" \
+MidtransFinishCallbackUrl="https://app.visualkonten.com/confirmation-payment" \
+GoogleClientId="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_id}}" \
+GoogleClientSecret="{{resolve:secretsmanager:VisualKonten:SecretString:google_client_secret}}" \
+MidtransServerKey="{{resolve:secretsmanager:VisualKonten:SecretString:midtrans_server_key}}" \
+UpstashRedisRestUrl="https://probable-macaw-128422.upstash.io" \
+UpstashRedisRestToken="gQAAAAAAAfWmAAIgcDI5NTFjMjdmZThlZDk0NGRhYmI4ODg2YzQxNWE2N2Q3ZQ" \
+QStashToken="PLACEHOLDER_QSTASH_TOKEN" \
+WorkerBQStashUrl="PLACEHOLDER_WORKER_B_URL_PROD" \
+WorkerCUrl="PLACEHOLDER_WORKER_C_URL_PROD" \
+RunPodApiKey="PLACEHOLDER_RUNPOD_API_KEY" \
+RunPodEndpointId="PLACEHOLDER_RUNPOD_ENDPOINT_ID" \
+WorkerUrls="PLACEHOLDER_WORKER_URLS_PROD" \
+MaxActiveSlots="2" \
+ComfyMaxConcurrentJobs="200" \
+GenerationBackend="comfyui" \
+GeminiApiKey="{{resolve:secretsmanager:VisualKonten:SecretString:gemini_api_key}}" \
+MainSecretArn="arn:aws:secretsmanager:ap-southeast-1:020576990105:secret:VisualKonten-uiIGyt" \
+"""

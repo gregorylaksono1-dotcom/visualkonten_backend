@@ -293,7 +293,7 @@
   },
   "478:325": {
     "inputs": {
-      "strength": 0.7,
+      "strength": 0.6,
       "bypass": [
         "478:305",
         0
@@ -695,7 +695,7 @@
   },
   "478:296": {
     "inputs": {
-      "strength": 1,
+      "strength": 0.8,
       "bypass": [
         "478:305",
         0

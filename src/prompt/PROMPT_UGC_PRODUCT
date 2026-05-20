@@ -14,14 +14,22 @@ STRICT RULES & CONSTRAINTS:
 
 2. SCRIPT STRUCTURE (TALKING UGC & CTA CLOSING): 
    - The script is spoken directly by the talent on screen.
-   - Use natural, casual, everyday spoken Indonesian (e.g., "banget", "nih", "sih", "gila", "sumpah").
-   - CLOSING MUST HAVE A GENERAL CTA: You MUST always end the script with a strong, urgent Call-To-Action. STRICTLY AVOID platform-specific terms like "keranjang kuning" or "link di bio". Use general e-commerce terms instead (e.g., "segera order sekarang...", "yuk langsung saja di checkout!", "buruan amankan stoknya sebelum kehabisan!", "langsung aja di order ya!").
-   - Use heavy punctuation for TTS pauses (..., !, ,).
+   - Use natural, casual, everyday spoken Indonesian. Filler words like "banget", "nih", "sih" are acceptable ONLY in the middle or end of sentences, NOT as opening hooks.
+   - MANDATORY HOOK ROTATION SYSTEM (CRITICAL): You MUST randomly select ONE hook type for each generation. Avoid formulaic or predictable openings.
+   - HOOK TYPES (Randomize Every Time):
+     * Product-First Hook: Start by naming the benefit directly (e.g., "Produk ini cocok banget buat kamu yang...", "Aku pakai ini karena...").
+     * Personal Testimony: Share a grounded experience (e.g., "Udah pakai beberapa hari dan hasilnya oke", "Tadinya ragu tapi setelah coba ternyata...", "Aku suka karena praktis").
+     * Problem-Solution Hook: Identify a relatable pain point first (e.g., "Kalau kamu sering [problem], coba deh pakai ini", "Susah nemu produk yang [quality]? Ini solusinya").
+     * Comparison Hook: Position against alternatives calmly (e.g., "Dibanding yang lain, ini lebih awet", "Harganya terjangkau tapi kualitasnya tetap oke").
+     * Recommendation Hook: Peer style (e.g., "Kalau lagi nyari [product type], ini bisa jadi pilihan", "Rekomen nih buat yang butuh...").
+   - STRICTLY FORBIDDEN OPENING WORDS: "Gila", "Sumpah", "Astaga", "Kaget", "Wow", "Anjir", or any overly reactive exclamations at the START.
+   - CLOSING MUST HAVE A GENERAL CTA: End the script with a calm, clear Call-To-Action. STRICTLY AVOID platform-specific terms like "keranjang kuning" or "link di bio". Use general e-commerce terms instead (e.g., "langsung aja di-order", "bisa langsung checkout", "yuk amankan sekarang", "coba deh kalau kalian tertarik").
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
      * The target Indonesian speaking rate is roughly 1.5 to 2 words per second.
-     * You MUST calculate the exact word count required: ({video_duration} * 1.75).
-     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 25 to 28.5 words. If duration is 10 seconds, it MUST be 15 to 17.5 words.
-     * Do NOT output scripts shorter than the required word count, otherwise the audio will finish before the video ends.
+     * You MUST calculate the exact word count required: ({video_duration} * 2.8).
+     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 25 to 28 words.
+     * SCRIPT EXPANSION & THE HARD BRAKE: If the user's input is short, INVENT natural filler content to reach the target word count. HOWEVER, YOU MUST STRICTLY STOP AT THE MAXIMUM WORD LIMIT (e.g., maximum 28 words for 15s). DO NOT EXCEED THE LIMIT under any circumstances, or the audio will be severely cut off!
+     * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field. If your count is higher than ({video_duration} * 3), you must rewrite the script to make it shorter!
 
 3. TTS & GENDER MATCHING (GEMINI FLASH-TTS): 
     - GENDER CONSISTENCY IS MANDATORY: The visual talent and the TTS voice MUST PERFECTLY MATCH in gender.

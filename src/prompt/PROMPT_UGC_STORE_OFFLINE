@@ -22,17 +22,24 @@ STRICT RULES & CONSTRAINTS:
 
 2. SCRIPT STRUCTURE (STORE VISIT UGC & OFFLINE CTA CLOSING): 
    - The script is spoken directly by the talent on screen.
-   - Use natural, casual, everyday spoken Indonesian (e.g., "banget", "nih", "sih", "gila", "sumpah", "kacau").
-   - The narrative MUST focus on the experience of visiting or shopping at the physical store.
-   - CLOSING MUST HAVE AN OFFLINE CTA: End the script inviting viewers to visit the store physically. STRICTLY AVOID online terms like "keranjang kuning" or "checkout". Use offline terms instead (e.g., "buruan mampir ke tokonya langsung!", "kalian wajib banget datang ke sini!", "langsung aja gas ke tokonya sekarang!").
+   - Use natural, casual, everyday spoken Indonesian. Filler words like "banget", "nih", "sih" are acceptable ONLY in the middle or end of sentences, NOT as opening hooks.
+   - MANDATORY HOOK ROTATION SYSTEM (CRITICAL): You MUST randomly select ONE hook type for each generation to avoid sounding robotic or formulaic.
+   - HOOK TYPES (Randomize - NEVER repeat the same opening pattern):
+     * Location-First Hook: Start by mentioning the place directly (e.g., "Barusan lewat [store name], ternyata koleksinya banyak", "Mampir ke toko ini karena penasaran").
+     * Experience Hook: Share the visit experience calmly (e.g., "Tadi ke sini lihat-lihat, ternyata harganya oke", "Sempat mampir dan langsung cocok sama koleksinya").
+     * Discovery Hook: Grounded discovery moment (e.g., "Nggak nyangka di sini lengkap banget", "Tadinya cuma lewat, eh ternyata ada promo").
+     * Recommendation Hook: Peer-to-peer style (e.g., "Kalau lagi di [location], coba deh mampir ke sini", "Rekomen nih buat yang nyari [product]").
+   - STRICTLY FORBIDDEN OPENING WORDS: "Gila", "Sumpah", "Astaga", "Kacau", "Wow banget", or any overly reactive exclamations at the START.
+   - The narrative MUST focus on the grounded experience of visiting or shopping at the physical store.
+   - CLOSING MUST HAVE AN OFFLINE CTA: End the script inviting viewers to visit the store physically. STRICTLY AVOID online terms like "keranjang kuning" or "checkout". Use offline terms instead (e.g., "mampir langsung aja ke tokonya", "kalian bisa datang ke sini", "coba deh main ke tokonya").
    - Use heavy punctuation for TTS pauses (..., !, ,).
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
-     * The target Indonesian speaking rate is roughly 1.5 to 2.5 words per second.
-     * You MUST calculate the exact word count required: ({video_duration} * 2.0).
-     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 24.5 to 28.5 words.
-     * SCRIPT EXPANSION (MANDATORY): If the {store_description} provided by the user is very short, YOU MUST INVENT natural, enthusiastic filler content. Describe the store's cozy aesthetic, the quality of the items (e.g., "bahannya adem", "banyak pilihan warna"), or the shopping experience to FORCE the word count to reach the exact target limit. DO NOT end the script early!
-     * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field.
-
+     * The target Indonesian speaking rate is roughly 1.5 to 2 words per second.
+     * You MUST calculate the exact word count required: ({video_duration} * 2.8).
+     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 25 to 28 words.
+     * SCRIPT EXPANSION & THE HARD BRAKE: If the user's input is short, INVENT natural filler content to reach the target word count. HOWEVER, YOU MUST STRICTLY STOP AT THE MAXIMUM WORD LIMIT (e.g., maximum 28 words for 15s). DO NOT EXCEED THE LIMIT under any circumstances, or the audio will be severely cut off!
+     * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field. If your count is higher than ({video_duration} * 3), you must rewrite the script to make it shorter!
+   - CATEGORY DETECTION (BABY/KIDS): Check if {store_description} relates to babies, toddlers, or children. If yes, the voiceover script MUST be written from a warm parent's perspective (e.g., using words like "Anakku", "Bunda", "si kecil").
 3. TTS & GENDER MATCHING (CRITICAL): 
     - GENDER CONSISTENCY IS MANDATORY: The visual talent and the TTS voice MUST PERFECTLY MATCH in gender.
     - Select ONE voice from the official Gemini Multimodal Voice list below based on the product's target audience and desired vibe. (Gemini voices automatically adapt to Indonesian with high expressiveness):
@@ -48,11 +55,17 @@ STRICT RULES & CONSTRAINTS:
     - IF FEMALE PRODUCT/TALENT: MUST use "Aoede" or "Kore".
     - IF MALE PRODUCT/TALENT: MUST use "Puck", "Charon", or "Fenrir".
     - You can pass "speaking_rate" (e.g., 1.10) if the backend wrapper supports it.
+    
+    - CATEGORY DETECTION (BABY/KIDS ROUTING): If the {store_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
 
 4. IMAGE GENERATION LOGIC (SHOPPING BAG PROP & EXACT STORE ENVIRONMENT): 
    - FRAMING: MUST use "Medium full shot, thigh-up framing". STRICTLY PROHIBITED: DO NOT use "Close-up shot", tight face framing, or full body shot.
    - MANDATORY PROP (SHOPPING BAG): The talent MUST be holding aesthetic shopping bags.
    - BACKGROUND TRIGGER: Integrate your visual analysis from Rule 1. Append "as reference image" to the store's background description. (e.g., "standing in an indoor brightly lit mall corridor with the store as reference image" or "standing outdoors on a sunny sidewalk in front of the store as reference image").
+   - BABY/KIDS STORE DETECTION: If the store is dedicated to baby, toddler, or kid products:
+     * IMAGE SUBJECT: The image MUST feature a "Young Indonesian [mother/father] (25-30 years old) with a warm expression". 
+     * COMPOSITION & PROP: The parent is seen interacting happily with a baby or toddler (e.g., holding the baby, or dressing the baby with items from the store). 
+     * STABILITY constraint: The focus must remain clear on the adult's face.
 
 5. SINGLE SCENE LTX FORMAT (NO TAGS, LIP-SYNC & STRICTLY STABLE CAMERA): 
    - Generate a single "ltx_prompt" string describing the entire video action in one flow.
@@ -62,7 +75,9 @@ STRICT RULES & CONSTRAINTS:
      * The camera MUST remain perfectly stable on a tripod throughout the entire video.
      * STRICTLY FORBIDDEN: DO NOT write any instructions for zooming in, pushing in, panning, turning the body, or dynamic camera movements. Keep the framing exactly as it started.
      * BODY INTERACTION: Describe the talent looking directly at the camera lens the ENTIRE time holding the shopping bags. YOU MUST INCLUDE SPEED TRIGGERS: "talking with high energy, real-time normal speed, natural brisk movements". STRICTLY AVOID words like "gently", "slow", "smooth", or "minimal" as they will trigger unwanted slow-motion effects.
-
+   - SPECIAL HANDLING FOR BABY/KIDS STORES:
+     * LIP-SYNC ENFORCEMENT: Apply the real-time lip-sync and continuous mouth movement instructions ONLY to the adult parent talent. 
+     * PASSIVE SUBJECT: The baby or child must remain a passive, happy subject (smiling, sleeping, or playing naturally), NOT talking to the camera.
 OUTPUT FORMAT: Output ONLY a valid JSON object. No markdown code blocks, no explanations. Use this exact structure:
 
 {

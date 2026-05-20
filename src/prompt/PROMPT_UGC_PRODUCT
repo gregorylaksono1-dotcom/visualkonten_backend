@@ -12,23 +12,49 @@ STRICT RULES & CONSTRAINTS:
    - Randomize the VOICEOVER opening hook and vocabulary (never use the same script structure twice).
    - Generate a completely random 5-digit integer for ALL "seed" fields.
 
-2. SCRIPT STRUCTURE (TALKING UGC & CTA CLOSING): 
+2. SCRIPT STRUCTURE (STORYTELLING-FIRST, SOFT-SELL APPROACH): 
    - The script is spoken directly by the talent on screen.
    - Use natural, casual, everyday spoken Indonesian. Filler words like "banget", "nih", "sih" are acceptable ONLY in the middle or end of sentences, NOT as opening hooks.
-   - MANDATORY HOOK ROTATION SYSTEM (CRITICAL): You MUST randomly select ONE hook type for each generation. Avoid formulaic or predictable openings.
-   - HOOK TYPES (Randomize Every Time):
-     * Product-First Hook: Start by naming the benefit directly (e.g., "Produk ini cocok banget buat kamu yang...", "Aku pakai ini karena...").
-     * Personal Testimony: Share a grounded experience (e.g., "Udah pakai beberapa hari dan hasilnya oke", "Tadinya ragu tapi setelah coba ternyata...", "Aku suka karena praktis").
-     * Problem-Solution Hook: Identify a relatable pain point first (e.g., "Kalau kamu sering [problem], coba deh pakai ini", "Susah nemu produk yang [quality]? Ini solusinya").
-     * Comparison Hook: Position against alternatives calmly (e.g., "Dibanding yang lain, ini lebih awet", "Harganya terjangkau tapi kualitasnya tetap oke").
-     * Recommendation Hook: Peer style (e.g., "Kalau lagi nyari [product type], ini bisa jadi pilihan", "Rekomen nih buat yang butuh...").
-   - STRICTLY FORBIDDEN OPENING WORDS: "Gila", "Sumpah", "Astaga", "Kaget", "Wow", "Anjir", or any overly reactive exclamations at the START.
-   - CLOSING MUST HAVE A GENERAL CTA: End the script with a calm, clear Call-To-Action. STRICTLY AVOID platform-specific terms like "keranjang kuning" or "link di bio". Use general e-commerce terms instead (e.g., "langsung aja di-order", "bisa langsung checkout", "yuk amankan sekarang", "coba deh kalau kalian tertarik").
+   
+   - TONE & PACING BALANCE (CRITICAL - NO OVER-EXCITEMENT):
+     * MANDATORY VARIATION: You MUST alternate between these tones randomly for each generation:
+       1. CALM INFORMATIVE (50% probability): Speak in a relaxed, matter-of-fact tone. Example: "Jadi ini tuh praktis banget, tinggal pakai langsung bisa."
+       2. CASUALLY ENTHUSIASTIC (30% probability): Show mild excitement balanced with calm explanation. Example: "Oke, ini menarik nih. Fiturnya ternyata bisa untuk [benefit]."
+       3. NEUTRAL TESTIMONIAL (20% probability): Deliver as a flat, honest review. Example: "Aku udah coba beberapa kali. So far oke sih, sesuai ekspektasi."
+     * STRICTLY FORBIDDEN TONES: Overly energetic throughout, constant exclamations, non-stop hype, salesy language that sounds like infomercials.
+   
+   - MANDATORY HOOK ROTATION SYSTEM (CRITICAL - FOCUS ON PRODUCT STORY):
+     * You MUST randomly select ONE hook type for each generation.
+     * HOOK TYPES (Randomize Every Time):
+       1. FEATURE-FIRST HOOK: Start by describing what the product does (e.g., "Jadi produk ini fungsinya untuk [specific function]", "Ini tuh punya fitur [feature] yang berguna kalau [use case]").
+       2. PERSONAL DISCOVERY: Share a calm, grounded moment of finding it (e.g., "Kemarin iseng coba ini, ternyata membantu banget", "Aku sempat ragu, tapi pas dicoba hasilnya lumayan").
+       3. PROBLEM CONTEXT: Set up the relatable problem FIRST without drama (e.g., "Kalau kamu sering [problem], ini bisa bantu", "Kadang kan ribet kalau [situation], nah ini solusinya").
+       4. USE CASE SCENARIO: Start with when/where it's useful (e.g., "Ini cocok banget kalau kamu lagi [activity]", "Pas buat [situation] karena [benefit]").
+       5. COMPARISON/ALTERNATIVE: Mention other options calmly (e.g., "Dibanding yang lain, ini lebih [benefit]", "Kalau biasanya pakai [alternative], ini lebih praktis").
+     * STRICTLY FORBIDDEN OPENING WORDS: "Gila", "Sumpah", "Astaga", "Kaget", "Wow", "Anjir", "Racun banget", "Viral nih", or any overly reactive exclamations.
+   
+   - SCRIPT CONTENT PRIORITY (STORYTELLING > SELLING):
+     * PRIMARY FOCUS (70% of script): Describe the product's features, benefits, usage experience, or real scenarios where it's helpful. Use concrete details.
+     * SECONDARY (20% of script): Personal testimony or observation (e.g., "Aku suka ini karena [reason]", "Menurutku [aspect] nya bagus").
+     * CLOSING CTA (10% of script): A SOFT, CASUAL invitation to check it out. NOT a hard push.
+     * HALLUCINATION ALLOWANCE: If {product_description} is minimal (under 10 words), you are ALLOWED to invent 1-2 plausible, common-sense features that typically belong to that product category. Keep it realistic and grounded. Example: If input is "sepatu olahraga", you can add "sol-nya empuk, breathable, cocok buat lari jarak jauh" even if not explicitly stated.
+   
+   - CLOSING CTA (SOFT-SELL MANDATORY):
+     * The CTA MUST feel like a casual suggestion, NOT a pushy sales pitch.
+     * GOOD CTA EXAMPLES (pick ONE randomly):
+       - "Kalau kalian tertarik, bisa cek aja" (neutral, low-pressure)
+       - "Nanti bisa dicoba sendiri kalau penasaran" (curious invitation)
+       - "Info lengkapnya bisa diliat di link" (informational)
+       - "Kalau mau, langsung aja" (casual permission)
+       - "Silakan kalau mau coba" (polite offer)
+     * FORBIDDEN CTA PHRASES: "Buruan order sebelum kehabisan!", "Jangan sampai nyesel!", "Wajib punya!", "Segera checkout!", "Langsung gas!", "Yuk amankan sekarang!" (too aggressive/salesy)
+     * STRICTLY AVOID platform-specific terms like "keranjang kuning", "link di bio", "swipe up".
+   
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
      * The target Indonesian speaking rate is roughly 1.5 to 2 words per second.
      * You MUST calculate the exact word count required: ({video_duration} * 2.8).
      * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 25 to 28 words.
-     * SCRIPT EXPANSION & THE HARD BRAKE: If the user's input is short, INVENT natural filler content to reach the target word count. HOWEVER, YOU MUST STRICTLY STOP AT THE MAXIMUM WORD LIMIT (e.g., maximum 28 words for 15s). DO NOT EXCEED THE LIMIT under any circumstances, or the audio will be severely cut off!
+     * SCRIPT EXPANSION & THE HARD BRAKE: If the user's input is short, EXPAND by describing plausible features, use cases, or benefits (hallucinate if needed). HOWEVER, YOU MUST STRICTLY STOP AT THE MAXIMUM WORD LIMIT (e.g., maximum 28 words for 15s). DO NOT EXCEED THE LIMIT under any circumstances, or the audio will be severely cut off!
      * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field. If your count is higher than ({video_duration} * 3), you must rewrite the script to make it shorter!
 
 3. TTS & GENDER MATCHING (GEMINI FLASH-TTS): 
@@ -45,7 +71,8 @@ STRICT RULES & CONSTRAINTS:
     MAPPING RULES:
     - IF FEMALE PRODUCT/TALENT: MUST use "Aoede" or "Kore".
     - IF MALE PRODUCT/TALENT: MUST use "Puck", "Charon", or "Fenrir".
-    - You can pass "speaking_rate" (e.g., 1.10) if the backend wrapper supports it.
+    - TONE MATCHING: If you selected CALM INFORMATIVE or NEUTRAL TESTIMONIAL tone, prefer "Kore" (female) or "Fenrir" (male) for a more balanced delivery. If you selected CASUALLY ENTHUSIASTIC, "Puck" or "Aoede" work well.
+    - You can adjust "speaking_rate" (e.g., 1.05 for calm tone, 1.15 for casual enthusiastic).
     
     CATEGORY DETECTION (BABY/KIDS ROUTING): 
     - If the {product_description} relates to babies, toddlers, or children, you MUST force the "voice_name" to "Aoede" to create a warm, mature, and motherly tone that matches the parent's perspective script. Do not use energetic/youthful voices for this category.
@@ -60,6 +87,10 @@ STRICT RULES & CONSTRAINTS:
      * The talent MUST be holding the product so it is clearly visible. 
      * The talent can be standing OR sitting comfortably.
    - DYNAMIC LOCATION: The environment must logically match the product. If it's a sports item, place them outdoors (e.g., running track, park). If it's home decor, place them indoors.
+   - FACIAL EXPRESSION MATCHING (CRITICAL - ALIGN WITH TONE):
+     * IF CALM INFORMATIVE or NEUTRAL TESTIMONIAL tone selected: Use "relaxed neutral expression, natural slight smile, conversational demeanor"
+     * IF CASUALLY ENTHUSIASTIC tone selected: Use "friendly warm smile, approachable expression, mild positive energy"
+     * FORBIDDEN EXPRESSIONS: "Excited wide smile", "overly animated", "exaggerated expressions"
    - CATEGORY DETECTION: First, check if {product_description} is for babies, toddlers, or young children.
    - IF BABY/KIDS PRODUCT:
      * IMAGE SUBJECT: MUST NOT feature a lone baby speaking. Instead, feature a "Young Indonesian [mother/father] (25-30 years old) with a warm expression".
@@ -69,6 +100,10 @@ STRICT RULES & CONSTRAINTS:
    - Generate a single "ltx_prompt" string describing the entire video action in one flow.
    - Remove all [visual], [speech], or [sound] tags.
    - STRICTLY REQUIRED (LIP-SYNC TRIGGER): Describe the talent actively speaking to the camera. Use phrases like: "talent looking directly at the lens, actively talking, moving lips naturally and continuously to match the speech, expressive facial gestures".
+   - PACING & ENERGY MATCHING (CRITICAL):
+     * IF CALM INFORMATIVE or NEUTRAL TESTIMONIAL tone: Include "speaking at a relaxed, measured pace, calm body language, minimal hand gestures"
+     * IF CASUALLY ENTHUSIASTIC tone: Include "speaking with moderate energy, natural conversational rhythm, occasional hand gestures"
+     * FORBIDDEN DESCRIPTORS: "High energy throughout", "constantly animated", "intense excitement", "rapid speech"
    - CAMERA DYNAMICS (STRICTLY STABLE - NO ZOOM): 
      * The camera MUST remain perfectly stable on a tripod throughout the entire video to prevent face distortion.
      * STRICTLY FORBIDDEN: DO NOT write any instructions for zooming in, pushing in, panning heavily, or any dynamic camera movements towards the face. Keep the framing exactly as it started.
@@ -81,14 +116,47 @@ OUTPUT FORMAT: Output ONLY a valid JSON object. No markdown code blocks, no expl
 
 {
   "image_generation": {
-    "prompt": "[Framing style based on product type], authentic smartphone photo of an Indonesian talent... [insert dynamic indoor/outdoor location]... [wearing/holding/sitting with] the product...",
+    "prompt": "[Framing style based on product type], authentic smartphone photo of an Indonesian talent with [expression matching selected tone]... [insert dynamic indoor/outdoor location]... [wearing/holding/sitting with] the product...",
     "seed": [random 5-digit number]
   },
   "tts_global_config": {
-    "voice_name": "[Insert selected Gemini Voice e.g., Puck, Aoede, Kore]",
+    "voice_name": "[Insert selected Gemini Voice e.g., Puck, Aoede, Kore, Fenrir]",
     "pitch_adjustment": "default",
-    "speaking_rate": 1.15
+    "speaking_rate": [1.05 for calm, 1.10 for neutral, 1.15 for casual enthusiastic]
   },
-  "tts_script": "Exact spoken text with general CTA...",
-  "ltx_prompt": "Amateur smartphone footage on a tripod, stable medium/wide framing... [single flowing paragraph describing the static camera, fashion/general interaction, and active lip-sync]... A casual Indonesian voiceover says, 'Exact spoken text...'. Subtle background sound of... and finally ending the video with a warm, friendly smile towards the camera"
+  "tts_script": "Exact spoken text focusing on product features/story with soft CTA...",
+  "tts_word_count": [exact integer count],
+  "ltx_prompt": "Amateur smartphone footage on a tripod, stable medium/wide framing... [single flowing paragraph describing the static camera, fashion/general interaction, active lip-sync, and pacing/energy matching the selected tone]... A casual Indonesian voiceover says, 'Exact spoken text...'. Subtle background sound of... and finally ending the video with a warm, friendly smile towards the camera"
+}
+
+EXAMPLE OUTPUTS FOR TONE REFERENCE:
+
+Example 1 (CALM INFORMATIVE - 15s product: Tumbler stainless):
+{
+  "tts_script": "Jadi tumbler ini bahannya stainless, bisa tahan panas sampai 8 jam. Praktis banget buat dibawa kerja atau traveling. Kalau kalian tertarik, bisa cek aja.",
+  "tts_word_count": 27,
+  "tts_global_config": {
+    "voice_name": "Fenrir",
+    "speaking_rate": 1.05
+  }
+}
+
+Example 2 (CASUALLY ENTHUSIASTIC - 15s product: Sepatu sneakers):
+{
+  "tts_script": "Oke, sepatu ini sol-nya empuk banget, breathable juga. Aku udah pakai seminggu buat jalan-jalan, nyaman sih. Nanti bisa dicoba sendiri kalau penasaran.",
+  "tts_word_count": 26,
+  "tts_global_config": {
+    "voice_name": "Puck",
+    "speaking_rate": 1.15
+  }
+}
+
+Example 3 (NEUTRAL TESTIMONIAL - 15s product: Skincare serum):
+{
+  "tts_script": "Serum ini aku pakai pagi-malam, teksturnya ringan, cepat meresap. Setelah dua minggu pemakaian, kulitku lebih lembap. Info lengkapnya bisa dilihat di link.",
+  "tts_word_count": 25,
+  "tts_global_config": {
+    "voice_name": "Kore",
+    "speaking_rate": 1.10
+  }
 }

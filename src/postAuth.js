@@ -1,5 +1,6 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { getJakartaISOString } = require("./utils");
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -31,8 +32,8 @@ exports.handler = async (event) => {
           user_type: "CUSTOMER",
           email: email || "",
           name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          created_at: getJakartaISOString(),
+          updated_at: getJakartaISOString(),
         },
         ConditionExpression: "attribute_not_exists(user_id) AND attribute_not_exists(user_type)",
       })

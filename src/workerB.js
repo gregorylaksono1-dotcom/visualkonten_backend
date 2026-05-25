@@ -17,8 +17,8 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { callOpenAILLM, callGoogleTTS, uploadToS3 } = require("./services");
 const { generateTTS } = require("./core/tts");
-const fs = require("fs");
-const path = require("path");
+const { generateUgcLlmResponse } = require("./core/ugcLlm");
+const { getJakartaISOString } = require("./utils");
 
 const REGION = process.env.AWS_REGION || "ap-southeast-1";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
@@ -213,7 +213,7 @@ exports.handler = async (event) => {
       user_id: jobDetail.user_id,
       status: "PROCESSING",
       worker_url: selectedWorkerUrl,
-      processing_at: new Date().toISOString(),
+      processing_at: getJakartaISOString(),
       completed_at: null,
       result_url: null,
     };
@@ -224,35 +224,25 @@ exports.handler = async (event) => {
       try {
         console.log(`[WorkerB] Processing ${jobDetail.request_type} AI requirements for job ${jobId}`);
         
-        let templateFileName = "PROMPT_UGC_PRODUCT";
-        let userPromptKey = "product_description";
+        const storeType = jobDetail.store_type || "offline";
+        const llmResponse = await generateUgcLlmResponse({
+          requestType: jobDetail.request_type,
+          prompt: jobDetail.prompt,
+          storeType,
+          sellingMode: jobDetail.selling_mode || "hard",
+          videoDuration: jobDetail.video_duration || 15,
+          callLLM: callOpenAILLM,
+        });
 
-        if (jobDetail.request_type === "UGC-S") {
-          userPromptKey = "store_description";
-          const storeType = jobDetail.store_type || "offline";
-          if (String(storeType).toLowerCase() === "online") {
-            templateFileName = "PROMPT_UGC_STORE_ONLINE";
-          } else {
-            templateFileName = "PROMPT_UGC_STORE_OFFLINE";
-          }
-        }
-
-        const templatePath = path.join(__dirname, "prompt", templateFileName);
-        const template = fs.readFileSync(templatePath, "utf-8");
-
-        const userPrompt = `1. {${userPromptKey}}: ${jobDetail.prompt}\n2. {video_duration}: 15 detik`;
-
-        const aiResponse = await callOpenAILLM(template, userPrompt);
-        if (aiResponse) {
-          const llmResponse = JSON.parse(aiResponse);
-          jobDetail.prompt = llmResponse.ltx_prompt || aiResponse; // Update prompt for executor
+        if (llmResponse) {
+          jobDetail.prompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
 
           // Update DynamoDB
           await dynamo.send(new UpdateCommand({
             TableName: process.env.USER_REQUEST_TABLE_NAME,
             Key: { uuid: jobId, user_email: jobDetail.user_email },
             UpdateExpression: "SET llm_response = :lr, updated_at = :now",
-            ExpressionAttributeValues: { ":lr": llmResponse, ":now": new Date().toISOString() }
+            ExpressionAttributeValues: { ":lr": llmResponse, ":now": getJakartaISOString() }
           }));
 
 

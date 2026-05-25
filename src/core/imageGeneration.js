@@ -80,7 +80,7 @@ async function generateComfyUIImage(params) {
       ExpressionAttributeValues: { 
           ":ip": imgPromptId, 
           ":uak": comfyApiKey,
-          ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
+          ":now": getJakartaISOString() 
       }
     }));
 

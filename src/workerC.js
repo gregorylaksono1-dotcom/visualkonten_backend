@@ -22,6 +22,7 @@
 
 const { Redis } = require("@upstash/redis");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { getJakartaISOString } = require("./utils");
 const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 
 // ─── Env vars ────────────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ const updateDynamoDBStatus = async (jobDetail, status, resultUrl) => {
     return;
   }
 
-  const now = new Date().toISOString();
+  const now = getJakartaISOString();
   const updateExpr = resultUrl
     ? "SET #st = :status, s3_key = :url, updated_at = :now"
     : "SET #st = :status, updated_at = :now";
@@ -209,7 +210,7 @@ exports.handler = async (event) => {
       status: finalStatus,
       worker_url: jobDetail.worker_url || null,
       processing_at: jobDetail.processing_at || null,
-      completed_at: new Date().toISOString(),
+      completed_at: getJakartaISOString(),
       result_url: resultUrl,
     };
     console.log(`Updating job_detail Redis untuk ${jobId}:`, JSON.stringify(updatedDetail));

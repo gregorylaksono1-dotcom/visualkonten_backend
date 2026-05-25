@@ -1,5 +1,6 @@
 const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getJakartaISOString } = require("../utils");
 const { getOpenAiKey, getSignedUrl } = require("../services");
 const { generateComfyUIVideo } = require("./videoGeneration");
 
@@ -38,6 +39,7 @@ async function generateImageOpenAI(params) {
     formData.append("size", size);
 
     // Fetch and append S3 images
+    let imgIndex = 1;
     for (const url of currentS3ImageUrls) {
       console.log(`[OpenAI ImageGen] Fetching reference image from S3: ${url}`);
       const imgRes = await fetch(url);
@@ -45,7 +47,8 @@ async function generateImageOpenAI(params) {
         throw new Error(`Failed to fetch S3 image from URL: ${url}`);
       }
       const imgBlob = await imgRes.blob();
-      formData.append("image[]", imgBlob, "image.png");
+      formData.append("image[]", imgBlob, `image${imgIndex}.png`);
+      imgIndex++;
     }
 
     // 4. Call OpenAI API
@@ -106,7 +109,7 @@ async function generateImageOpenAI(params) {
       UpdateExpression: "SET generated_image = :genImg, updated_at = :now",
       ExpressionAttributeValues: {
         ":genImg": s3Key,
-        ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" })
+        ":now": getJakartaISOString()
       }
     }));
 

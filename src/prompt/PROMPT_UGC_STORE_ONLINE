@@ -41,7 +41,7 @@ STRICT RULES & CONSTRAINTS:
    - STRICT WORD COUNT LIMIT (CRITICAL FOR DURATION MATCHING): 
      * The target Indonesian speaking rate is roughly 1.5 to 2 words per second.
      * You MUST calculate the exact word count required: ({video_duration} * 2.8).
-     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 25 to 28 words.
+     * For example, if duration is 15 seconds, your script MUST contain EXACTLY between 30 to 42 words.
      * SCRIPT EXPANSION & THE HARD BRAKE: If the user's input is short, INVENT natural filler content to reach the target word count. HOWEVER, YOU MUST STRICTLY STOP AT THE MAXIMUM WORD LIMIT (e.g., maximum 28 words for 15s). DO NOT EXCEED THE LIMIT under any circumstances, or the audio will be severely cut off!
      * DEBUGGING REQUIREMENT: You MUST accurately count the total words in your generated "tts_script" and output this integer in the "tts_word_count" field. If your count is higher than ({video_duration} * 3), you must rewrite the script to make it shorter!
    - CATEGORY DETECTION (BABY/KIDS): Check if {store_description} relates to babies, toddlers, or children. If yes, the voiceover script MUST be written from a warm parent's perspective (e.g., using words like "Anakku", "Bunda", "si kecil").

@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
-const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio } = require("../utils");
+const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
 const { docClient, s3Client, TransactWriteCommand, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, enqueueJob, invokeComfyUI, callOpenAILLM, PutCommand } = require("../services");
 
 const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
@@ -63,7 +63,7 @@ exports.handlePostResource = async (event) => {
   }
 
   const requestId = randomUUID();
-  const now = new Date().toISOString();
+  const now = getJakartaISOString();
 
   const runResourceTransact = async (putItem) => {
     try {

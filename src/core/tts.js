@@ -1,4 +1,5 @@
 const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { getJakartaISOString } = require("../utils");
 
 function addWavHeader(pcmBuffer, sampleRate = 24000) {
   const numChannels = 1;
@@ -71,7 +72,7 @@ async function generateTTS(params) {
         ExpressionAttributeValues: { 
           ":audio": audioS3Key, 
           ":duration": duration,
-          ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
+          ":now": getJakartaISOString()
         }
       }));
       return { audioS3Key, duration };

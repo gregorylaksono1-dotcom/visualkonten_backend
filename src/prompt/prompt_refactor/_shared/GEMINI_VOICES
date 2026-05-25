@@ -1,0 +1,20 @@
+GEMINI MULTIMODAL VOICE (layer 2 memilih, layer 3 meneruskan ke tts_global_config / voiceover_config):
+
+- Aoede (Female): hangat, lembut, profesional — parenting, kecantikan, elegan.
+- Kore (Female): jernih, tenang, artikulasi jelas — review informatif.
+- Puck (Male): santai, ceria, energik — UGC kasual, gadget, fashion pria.
+- Charon (Male): berwibawa, deep — premium, otomotif, serius.
+- Fenrir (Male): standar, informatif, serba guna.
+
+MAPPING:
+- Talent perempuan → "Aoede" atau "Kore".
+- Talent laki-laki → "Puck", "Charon", atau "Fenrir".
+- Kategori bayi/anak (produk/toko) → WAJIB "Aoede", naratif perspektif orang tua.
+
+SPEAKING RATE (UGC product, by selling_mode + tone):
+- soft + calm/neutral: 1.05–1.10
+- soft + casual enthusiastic: 1.15
+- hard + energetic: 1.20
+- hard + urgent: 1.25
+- Store UGC default: 1.15
+- Product no-talent soft: 1.0–1.1 | hard: 1.2–1.3

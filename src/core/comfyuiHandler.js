@@ -2,15 +2,16 @@ const { QueryCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getRedis } = require("../services");
 const { generateComfyUIVideo } = require("./videoGeneration");
+const { getJakartaISOString } = require("../utils");
 
 /**
  * Handles the completion of a ComfyUI job (Image or Video)
  */
 async function processComfyUICompletion(params) {
-  const { 
-    body, dynamo, s3, 
-    USER_REQUEST_TABLE, S3_RESOURCE_BUCKET, 
-    IMAGE_PROMPT_ID_INDEX, VIDEO_PROMPT_ID_INDEX 
+  const {
+    body, dynamo, s3,
+    USER_REQUEST_TABLE, S3_RESOURCE_BUCKET,
+    IMAGE_PROMPT_ID_INDEX, VIDEO_PROMPT_ID_INDEX
   } = params;
 
   const { status, prompt_id, downloads } = body;
@@ -67,9 +68,9 @@ async function processComfyUICompletion(params) {
   const buffer = Buffer.from(await res.arrayBuffer());
 
   // 3. Upload to S3
-  const isVideo = ["videos", "video", "gifs"].includes(mediaType) || 
-                  (output.filename && output.filename.toLowerCase().endsWith('.mp4')) || 
-                  (output.filename && output.filename.toLowerCase().endsWith('.webm'));
+  const isVideo = ["videos", "video", "gifs"].includes(mediaType) ||
+    (output.filename && output.filename.toLowerCase().endsWith('.mp4')) ||
+    (output.filename && output.filename.toLowerCase().endsWith('.webm'));
   const folder = isVideo ? "generated_videos" : "generated_image";
   const ext = isVideo ? "mp4" : "png";
   const contentType = isVideo ? "video/mp4" : "image/png";
@@ -86,15 +87,15 @@ async function processComfyUICompletion(params) {
   // 4. Update DynamoDB
   // For image jobs, we just set generated_image.
   // For video jobs, we set result_url and status = COMPLETED.
-  const updateExpr = isVideo 
+  const updateExpr = isVideo
     ? "SET result_url = :res, #s = :status, updated_at = :now"
     : "SET generated_image = :res, updated_at = :now";
-    
-  const attrValues = { 
-    ":res": s3Key, 
-    ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
+
+  const attrValues = {
+    ":res": s3Key,
+    ":now": getJakartaISOString()
   };
-  
+
   const attrNames = {};
   if (isVideo) {
     attrValues[":status"] = "COMPLETED";

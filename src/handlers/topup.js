@@ -1,4 +1,4 @@
-const { response, getClaims, normalizeUserEmail, parseBody, generateFriendlyOrderId, formatMidtransStartTime, pickEnabledPaymentsByNominal } = require("../utils");
+const { response, getClaims, normalizeUserEmail, parseBody, generateFriendlyOrderId, formatMidtransStartTime, pickEnabledPaymentsByNominal, getJakartaISOString } = require("../utils");
 const { docClient, QueryCommand, PutCommand, createMidtransSnapTransaction } = require("../services");
 
 const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
@@ -63,7 +63,7 @@ exports.handlePostSnap = async (event) => {
   if (!total_credit || !total_price) return response(400, { error: "Missing required fields." });
 
   const orderId = generateFriendlyOrderId(userId);
-  const now = new Date().toISOString();
+  const now = getJakartaISOString();
 
   await docClient.send(new PutCommand({
     TableName: TOPUP_CREDIT_TABLE_NAME,

@@ -68,7 +68,7 @@ const extFromContentType = (ct) => {
   return "jpg";
 };
 
-const ALLOWED_VIDEO_QUALITY = new Set(["480p", "720p", "1080p"]);
+const ALLOWED_VIDEO_QUALITY = new Set(["720p", "1080p"]);
 const ALLOWED_ASPECT_RATIO = new Set(["9:16", "16:9", "1:1"]);
 
 const normalizeVideoQuality = (raw) => {
@@ -128,6 +128,21 @@ const formatMidtransStartTime = (date = new Date()) => {
   return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second} +0700`;
 };
 
+const getJakartaISOString = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${byType.year}-${byType.month}-${byType.day}T${byType.hour}:${byType.minute}:${byType.second}+07:00`;
+};
+
 const pickEnabledPaymentsByNominal = (nominal) => {
   if (nominal < 20000) return ["shopeepay", "gopay", "qris"];
   if (nominal > 1000000) return ["credit_card", "bca_va", "bni_va", "mandiri_clickpay"];
@@ -180,6 +195,7 @@ module.exports = {
   getClaims,
   generateFriendlyOrderId,
   formatMidtransStartTime,
+  getJakartaISOString,
   pickEnabledPaymentsByNominal,
   buildCreditStatusFilterParts,
 };

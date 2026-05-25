@@ -5,10 +5,9 @@
 "use strict";
 
 const buildWorkflow = (requestType, { prompt, videoQuality, aspectRatio, uploadedFiles }) => {
-  const resolutionMap = { 
-    "480p": { w: 854, h: 480 }, 
-    "720p": { w: 1280, h: 720 }, 
-    "1080p": { w: 1920, h: 1080 } 
+  const resolutionMap = {
+    "720p": { w: 1280, h: 720 },
+    "1080p": { w: 1920, h: 1080 }
   };
   const res = resolutionMap[videoQuality] || resolutionMap["720p"];
   let [w, h] = [res.w, res.h];
@@ -122,12 +121,12 @@ const buildWorkflow = (requestType, { prompt, videoQuality, aspectRatio, uploade
       return {
         "483": { "inputs": { "image": uploadedFiles.image1 || "character.png" }, "class_type": "LoadImage" },
         "1185": { "inputs": { "image": uploadedFiles.image2 || "product.png" }, "class_type": "LoadImage" },
-        "1244": { 
-          "inputs": { 
-            "image0": ["483", 0], 
-            "image1": ["1185", 0] 
-          }, 
-          "class_type": "BatchImagesNode" 
+        "1244": {
+          "inputs": {
+            "image0": ["483", 0],
+            "image1": ["1185", 0]
+          },
+          "class_type": "BatchImagesNode"
         },
         "1239": {
           "inputs": {

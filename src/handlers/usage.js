@@ -1,4 +1,4 @@
-const { response, getClaims, usageEmailCandidates, mapUserRequestUsageRow } = require("../utils");
+const { response, getClaims, usageEmailCandidates, mapUserRequestUsageRow, getJakartaISOString } = require("../utils");
 const { docClient, QueryCommand, scanUserRequestsForUsage } = require("../services");
 
 const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
@@ -14,7 +14,7 @@ exports.handleGetUsage = async (event) => {
   const limit = Math.min(Number(qsp.limit || 100), 200);
   const nextToken = qsp.next_token;
 
-  const sinceIso = new Date(Date.now() - sinceDays * 24 * 3600 * 1000).toISOString();
+  const sinceIso = getJakartaISOString(new Date(Date.now() - sinceDays * 24 * 3600 * 1000));
   const candidates = usageEmailCandidates(email);
   const byUuid = new Map();
   let lastEvaluatedKey = null;

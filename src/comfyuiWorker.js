@@ -16,6 +16,7 @@
 
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { getJakartaISOString } = require("./utils");
 const { buildWorkflow } = require("./workflows");
 const { 
   callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey,
@@ -25,8 +26,7 @@ const {
 const { generateComfyUIImage } = require("./core/imageGeneration");
 const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
-const fs = require("fs");
-const path = require("path");
+const { generateUgcLlmResponse } = require("./core/ugcLlm");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const COMFY_BASE_URL = "https://cloud.comfy.org";
@@ -46,7 +46,7 @@ const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }
 const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId } = {}) => {
   const updates = ["#s = :s", "updated_at = :u"];
   const names = { "#s": "status" };
-  const values = { ":s": status, ":u": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) };
+  const values = { ":s": status, ":u": getJakartaISOString() };
 
   if (resultUrl !== undefined) {
     updates.push("result_url = :r");
@@ -146,36 +146,30 @@ const handleSubmission = async (event) => {
     try {
       console.log(`[Worker] Processing ${requestType} AI requirements for job ${jobId}`);
 
-      let templateFileName = "PROMPT_UGC_PRODUCT";
-      let userPromptKey = "product_description";
+      const storeType = event.store_type || "offline";
+      const sellingMode = event.selling_mode || "hard";
+      const videoDuration = event.video_duration || 15;
 
-      if (requestType === "UGC-S") {
-        userPromptKey = "store_description";
-        const storeType = event.store_type || "offline";
-        if (String(storeType).toLowerCase() === "online") {
-          templateFileName = "PROMPT_UGC_STORE_ONLINE";
-        } else {
-          templateFileName = "PROMPT_UGC_STORE_OFFLINE";
-        }
-      }
+      const llmResponse = await generateUgcLlmResponse({
+        requestType,
+        prompt,
+        storeType,
+        sellingMode,
+        videoDuration,
+        callLLM: callOpenAILLM,
+      });
 
-      const templatePath = path.join(__dirname, "prompt", templateFileName);
-      const template = fs.readFileSync(templatePath, "utf-8");
-
-      const userPrompt = `1. {${userPromptKey}}: ${prompt}\n2. {video_duration}: 15 detik`;
-
-      const aiResponse = await callOpenAILLM(template, userPrompt);
-      if (aiResponse) {
+      if (llmResponse) {
         try {
-          const llmResponse = JSON.parse(aiResponse);
-          finalJobPrompt = llmResponse.ltx_prompt || aiResponse;
+          finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
 
           // Update DynamoDB with LLM response
+          const now = getJakartaISOString();
           await dynamo.send(new UpdateCommand({
             TableName: USER_REQUEST_TABLE,
             Key: { uuid: jobId, user_email: userEmail },
             UpdateExpression: "SET llm_response = :lr, updated_at = :now",
-            ExpressionAttributeValues: { ":lr": llmResponse, ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) }
+            ExpressionAttributeValues: { ":lr": llmResponse, ":now": now }
           }));
 
           // Trigger Gemini TTS

@@ -1,0 +1,19 @@
+ORCHESTRATOR — SINGLE LLM CALL (modular prompts, unified execution)
+
+You receive THREE instruction blocks below (Phase 1 → 2 → 3). File-file prompt disimpan terpisah di repo untuk kemudahan edit; saat runtime Anda menjalankan SEMUA fase dalam SATU respons.
+
+WORKFLOW (internal — lakukan berurutan sebelum menulis jawaban akhir):
+1. PHASE 1 — PLANNING: Buat creative_plan (visual direction, lighting, camera, mood, pacing, setting, dll.) sesuai skema Phase 1.
+2. PHASE 2 — SCRIPT WRITER: Gunakan creative_plan + input user; tulis script_package (voiceover, CTA, tts_global_config, overlays jika ada).
+3. PHASE 3 — PROMPT COMPOSER: Gabungkan creative_plan + script_package menjadi JSON final pipeline.
+
+OUTPUT RULES (CRITICAL):
+- Respons Anda HANYA JSON valid dari Phase 3 (bentuk legacy pipeline: image_generation, ltx_prompt, tts_*, dll.).
+- JANGAN keluarkan JSON terpisah untuk Phase 1 atau Phase 2.
+- JANGAN markdown, penjelasan, atau code fence.
+- Semua fase harus konsisten (tone, pacing, gender voice, word count).
+- Product no_talent: ltx_prompt MUST include video_timing 3-phase seconds (A hold 0-15%, B transition 15-45%, C motion 45-100%) + camera_movement.phases; reveal complete only by 0.45*D; no orbit.
+- Product no_talent: ltx_prompt MUST implement creative_plan.camera_movement; no "fixed throughout" unless Static or Slow Zoom only.
+- Product no_talent: Default spoken CTA = keranjang_kuning; if product_description specifies another CTA, use custom_from_description. Include voiceover_config.cta + source from Phase 2.
+
+Jika Phase 3 memakai field dari Phase 2 (tts_script, voice_name), nilainya harus identik dengan yang Anda tentukan di Phase 2.

@@ -8,6 +8,7 @@ const {
   submitWorkflow, 
   getSignedUrl 
 } = require("../services");
+const { getJakartaISOString } = require("../utils");
 
 /**
  * Triggers the ComfyUI Video Generation workflow (LTX-2.3)
@@ -66,11 +67,11 @@ async function generateComfyUIVideo(params) {
     if (videoWorkflow["478:286"]) videoWorkflow["478:286"].inputs.noise_seed = randomSeed;
     
     // Width & Height (Nodes 478:330 and 478:324)
-    let w = 720, h = 1280;
-    if (videoQuality === "480p") {
-      if (aspectRatio === "16:9") { w = 854; h = 480; }
-      else if (aspectRatio === "1:1") { w = 480; h = 480; }
-      else { w = 480; h = 854; } // 9:16
+    let w = 720, h = 1280; // default to 720p 9:16
+    if (videoQuality === "1080p") {
+      if (aspectRatio === "16:9") { w = 1920; h = 1080; }
+      else if (aspectRatio === "1:1") { w = 1080; h = 1080; }
+      else { w = 1080; h = 1920; } // 9:16
     } else {
       if (aspectRatio === "16:9") { w = 1280; h = 720; }
       else if (aspectRatio === "1:1") { w = 720; h = 720; }
@@ -96,7 +97,7 @@ async function generateComfyUIVideo(params) {
         ":vp": videoPromptId,
         ":status": "PROCESSING",
         ":uak": usedApiKey || null,
-        ":now": new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }) 
+        ":now": getJakartaISOString() 
       }
     }));
 

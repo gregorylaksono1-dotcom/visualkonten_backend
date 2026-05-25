@@ -1,0 +1,7 @@
+WORD COUNT (semua layer script — WAJIB):
+- Target laju bicara Indonesia: ~1,5–2 kata/detik.
+- Hitung batas: min = floor({video_duration} * 1.5), max = floor({video_duration} * 2.8).
+- Contoh 15 detik: 22–42 kata (target ideal ~30–38).
+- HARD BRAKE: jangan melebihi max; audio akan terpotong.
+- Layer 2 WAJIB mengisi "tts_word_count" dengan hitungan kata yang akurat.
+- Jika tts_word_count > floor({video_duration} * 3), tulis ulang script lebih pendek.

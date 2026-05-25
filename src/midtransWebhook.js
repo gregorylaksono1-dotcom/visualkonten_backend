@@ -6,6 +6,7 @@ const {
   TransactWriteCommand,
   UpdateCommand,
 } = require("@aws-sdk/lib-dynamodb");
+const { getJakartaISOString } = require("./utils");
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
@@ -39,7 +40,7 @@ const patchTopupMidtransMeta = async (topupItem, payload, transactionId) => {
   const parts = ["transaction_id = :tid", "updated_at = :now"];
   const values = {
     ":tid": String(transactionId),
-    ":now": new Date().toISOString(),
+    ":now": getJakartaISOString(),
   };
   if (payload?.payment_type != null && String(payload.payment_type).length > 0) {
     parts.push("#pt = :pt");
@@ -86,7 +87,7 @@ exports.handler = async (event) => {
           transaction_id: String(transactionId),
           transaction_status: String(transactionStatus),
           payload,
-          received_at: new Date().toISOString(),
+          received_at: getJakartaISOString(),
         },
       })
     );
@@ -149,7 +150,7 @@ exports.handler = async (event) => {
       }
 
       const amount = Number(topupItem.amount || 0);
-      const now = new Date().toISOString();
+      const now = getJakartaISOString();
 
       const metaNames = {
         "#uuid": "uuid",

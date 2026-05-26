@@ -2,7 +2,9 @@
 
 Workflow: **`product_only_camera_movement.json`**
 
-For UGC talking-head jobs, use **`Generate UGC Video With Voice Clone.json`** (single image, unchanged).
+For **UGC-P** (talent → product), use **`ugc_product_camera_movement (API).json`** — see `UGC_PRODUCT_2FRAME_COMFYUI_TEST.md`.
+
+For **UGC-S** (store) talking-head, use **`Generate UGC Video With Voice Clone.json`** (single image, unchanged).
 
 ## LLM output → two images
 

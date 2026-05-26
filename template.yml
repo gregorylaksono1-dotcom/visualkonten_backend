@@ -125,6 +125,13 @@ Parameters:
     Type: Number
     Description: Maksimum job paralel per API Key ComfyUI
     Default: 1
+  UsePromptRefactor:
+    Type: String
+    Description: 'true = pipeline prompt 3-layer (UGC); false = prompt monolitik legacy'
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
   GeminiApiKey:
     Type: String
     Description: API Key untuk Google Gemini 2.5 Flash (Audio/TTS)
@@ -663,6 +670,8 @@ Resources:
             Ref: UserRequestTable
           S3_RESOURCE_BUCKET:
             Ref: S3ResourceBucketName
+          USE_PROMPT_REFACTOR:
+            Ref: UsePromptRefactor
       Events:
         WorkerBInvoke:
           Type: Api
@@ -781,6 +790,8 @@ Resources:
             Ref: UpstashRedisRestToken
           COMFY_MAX_CONCURRENT_JOBS:
             Ref: ComfyMaxConcurrentJobs
+          USE_PROMPT_REFACTOR:
+            Ref: UsePromptRefactor
       Events:
         ComfyUIPollSchedule:
           Type: Schedule
@@ -831,6 +842,44 @@ Resources:
             RestApiId: !Ref Api
             Auth:
               Authorizer: NONE # Webhook usually doesn't have Cognito auth
+  RecoveryCronFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: recoveryCron.handler
+      Runtime: nodejs22.x
+      Timeout: 900 # 15 minutes timeout to allow downloads
+      MemorySize: 512
+      Architectures:
+        - x86_64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - S3CrudPolicy:
+            BucketName: !Ref S3ResourceBucketName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref MainSecretArn
+      Environment:
+        Variables:
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
+          VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
+          MAIN_SECRET_ARN: !Ref MainSecretArn
+      Events:
+        HourlyCronEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Description: Recover stalled jobs that are older than 1 hour
+            Enabled: true
+    Metadata:
+      SamResourceId: RecoveryCronFunction
 
 Outputs:
   ApiEndpoint:

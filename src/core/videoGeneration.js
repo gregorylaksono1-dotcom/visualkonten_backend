@@ -19,7 +19,8 @@ async function generateComfyUIVideo(params) {
     uuid, user_email, user_id, request_type,
     llm_response, audio, audio_duration,
     video_quality, aspect_ratio,
-    imageResultUrl, // URL from ComfyUI Flux completion
+    imageResultUrl, // first_frame / talent (or single image)
+    productFrameUrl, // last_frame for UGC-P 2-keyframe (optional)
     used_api_key,
     dynamo, s3, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET
   } = params;
@@ -46,13 +47,32 @@ async function generateComfyUIVideo(params) {
     const comfyAudioName = await uploadInputAudio(audioSignedUrl, `${jobId}_tts.wav`, usedApiKey);
 
     // 3. Load Video Workflow JSON
-    const workflowPath = path.join(__dirname, "..", "workflow", "Generate UGC Video With Voice Clone (API).json");
+    const useTwoFrame =
+      request_type === "UGC-P" &&
+      productFrameUrl &&
+      (llmResponse.image_generation?.talent_frame || llmResponse.image_generation?.product_frame);
+
+    const workflowFile = useTwoFrame
+      ? "ugc_talent_and_product (API).json"
+      : "Generate UGC Video With Voice Clone (API).json";
+
+    const workflowPath = path.join(__dirname, "..", "workflow", workflowFile);
     const videoWorkflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
 
     // 4. Populate Workflow Nodes
     
-    // Node 440: Load Image
+    // Node 440: first_frame (talent or single image)
     if (videoWorkflow["440"]) videoWorkflow["440"].inputs.image = comfyImageName;
+
+    if (useTwoFrame && videoWorkflow["441"]) {
+      const comfyProductName = await uploadInputImage(
+        productFrameUrl,
+        `${jobId}_product_frame.png`,
+        usedApiKey
+      );
+      videoWorkflow["441"].inputs.image = comfyProductName;
+      console.log(`[VideoGen] 2-frame UGC-P: 440=${comfyImageName}, 441=${comfyProductName}`);
+    }
     
     // Node 611: Load Audio
     if (videoWorkflow["611"]) videoWorkflow["611"].inputs.audio = comfyAudioName;

@@ -19,7 +19,7 @@ User input
 
 | Folder | Menggantikan | Catatan |
 |--------|--------------|---------|
-| `ugc_product/` | `PROMPT_UGC_PRODUCT` | Talking head + produk, `{selling_mode}` |
+| `ugc_product/` | `PROMPT_UGC_PRODUCT` | Talking head + produk, 2 keyframes; workflow **`ugc_talent_and_product`** |
 | `ugc_store_offline/` | `PROMPT_UGC_STORE_OFFLINE` | Kunjungan toko fisik + tas belanja |
 | `ugc_store_online/` | `PROMPT_UGC_STORE_ONLINE` | Promo e-commerce, opsi Pixar 3D |
 | `product_no_talent/` | `PROMPT_PRODUCT` | Iklan produk tanpa talent |

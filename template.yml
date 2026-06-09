@@ -73,10 +73,6 @@ Parameters:
     Type: String
     Description: Midtrans Snap finish callback URL
     Default: https://bkn-ai-dashboard.vercel.app/confirmation-payment
-  MidtransServerKey:
-    Type: String
-    Description: Midtrans Server Key
-    Default: PLACEHOLDER_MIDTRANS_SERVER_KEY
   UpstashRedisRestUrl:
     Type: String
     Description: Upstash Redis REST URL
@@ -85,42 +81,21 @@ Parameters:
     Type: String
     Description: Upstash Redis REST Token
     Default: PLACEHOLDER_UPSTASH_REDIS_REST_TOKEN
-  QStashToken:
-    Type: String
-    Description: Upstash QStash token
-    Default: PLACEHOLDER_QSTASH_TOKEN
-  WorkerBQStashUrl:
-    Type: String
-    Description: URL publik Worker B yang akan dipanggil via QStash
-    Default: PLACEHOLDER_WORKER_B_QSTASH_URL
-  WorkerCUrl:
-    Type: String
-    Description: URL publik Worker C (webhook yang diberikan ke RunPod/GCP)
-    Default: PLACEHOLDER_WORKER_C_URL
-  RunPodApiKey:
-    Type: String
-    Description: RunPod API key
-    Default: PLACEHOLDER_RUNPOD_API_KEY
-  RunPodEndpointId:
-    Type: String
-    Description: RunPod Serverless Endpoint ID
-    Default: PLACEHOLDER_RUNPOD_ENDPOINT_ID
-  WorkerUrls:
-    Type: String
-    Description: Comma separated list of worker URLs
-    Default: ''
-  MaxActiveSlots:
-    Type: String
-    Description: Jumlah maksimum job yang berjalan paralel per Worker URL
-    Default: '2'
   GenerationBackend:
     Type: String
-    Description: Backend generasi video/image. "comfyui" = ComfyUI Cloud, "redis"
-      = Worker B/C
+    Description: Backend generasi video/image (non FREE-TRIAL). "comfyui" = ComfyUI
+      Cloud Lambda
     Default: redis
     AllowedValues:
     - redis
     - comfyui
+  FreeTrialBackend:
+    Type: String
+    Description: Backend generasi video untuk FREE-TRIAL. "comfyui" = ComfyUI Cloud; "vertex_ai" = Vertex AI (Veo)
+    Default: comfyui
+    AllowedValues:
+    - comfyui
+    - vertex_ai
   ComfyMaxConcurrentJobs:
     Type: Number
     Description: Maksimum job paralel per API Key ComfyUI
@@ -132,14 +107,20 @@ Parameters:
     AllowedValues:
     - 'true'
     - 'false'
-  GeminiApiKey:
+  ConfigSsmPath:
     Type: String
-    Description: API Key untuk Google Gemini 2.5 Flash (Audio/TTS)
-    Default: PLACEHOLDER_GEMINI_API_KEY
-  MainSecretArn:
+    Description: SSM Parameter Store path prefix for app secrets (e.g. /visualkonten/prod)
+    Default: /visualkonten/sbx
+  GcsBucket:
     Type: String
-    Description: ARN for consolidated AWS Secrets Manager secret
-    Default: arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q
+    Description: Bucket GCS untuk output FREE-TRIAL Vertex AI
+    Default: result-visualkonten
+  VeoVideoDurationSeconds:
+    Type: Number
+    Description: Durasi video Veo (detik) untuk FREE-TRIAL / Vertex AI
+    Default: 8
+    MinValue: 1
+    MaxValue: 60
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -449,20 +430,26 @@ Resources:
           Action:
           - lambda:InvokeFunction
           Resource:
-            Fn::GetAtt:
+          - Fn::GetAtt:
             - ComfyUIWorkerFunction
+            - Arn
+          - Fn::GetAtt:
+            - FreeTrialWorkerFunction
             - Arn
       - Version: '2012-10-17'
         Statement:
         - Effect: Allow
           Action:
-          - secretsmanager:GetSecretValue
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
           Resource:
-          - Ref: MainSecretArn
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          MAIN_SECRET_ARN:
-            Ref: MainSecretArn
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
           PROFILE_TABLE_NAME:
             Ref: ProfileTable
           TOPUP_CREDIT_TABLE_NAME:
@@ -479,18 +466,12 @@ Resources:
             Ref: MidtransApiUrl
           MIDTRANS_FINISH_CALLBACK_URL:
             Ref: MidtransFinishCallbackUrl
-          UPSTASH_REDIS_REST_URL:
-            Ref: UpstashRedisRestUrl
-          UPSTASH_REDIS_REST_TOKEN:
-            Ref: UpstashRedisRestToken
-          QSTASH_TOKEN:
-            Ref: QStashToken
-          WORKER_B_QSTASH_URL:
-            Ref: WorkerBQStashUrl
           GENERATION_BACKEND:
             Ref: GenerationBackend
           COMFYUI_FUNCTION_NAME:
             Ref: ComfyUIWorkerFunction
+          FREE_TRIAL_FUNCTION_NAME:
+            Ref: FreeTrialWorkerFunction
       Events:
         GetUser:
           Type: Api
@@ -555,6 +536,13 @@ Resources:
               Ref: Api
             Path: /resource
             Method: post
+        GetPresigned:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /presigned
+            Method: get
         HelloWorld:
           Type: Api
           Properties:
@@ -622,14 +610,69 @@ Resources:
               Authorizer: NONE
     Metadata:
       SamResourceId: MidtransWebhookFunction
-  WorkerBFunction:
+  LambdaGcpBucketWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: workerB.handler
+      Handler: lambdaGcpBucketWebhook.handler
       Runtime: nodejs22.x
-      Timeout: 60
-      MemorySize: 256
+      Timeout: 300
+      MemorySize: 512
+      Architectures:
+      - x86_64
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:PutObject
+          - s3:GetObject
+          Resource:
+            Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: UserRequestTable
+      Environment:
+        Variables:
+          S3_RESOURCE_BUCKET:
+            Ref: S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME:
+            Ref: UserRequestTable
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
+          # DEP0040: transitive deps (google-auth) still require('punycode') on Node 22
+          NODE_OPTIONS: --disable-warning=DEP0040
+      Events:
+        LambdaGcpBucketWebhook:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /gcp/bucket-webhook
+            Method: post
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: LambdaGcpBucketWebhookFunction
+  FreeTrialWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: freeTrialWorker.handler
+      Runtime: nodejs22.x
+      Timeout: 300
+      MemorySize: 512
       Architectures:
       - x86_64
       Policies:
@@ -641,110 +684,38 @@ Resources:
         Statement:
         - Effect: Allow
           Action:
-          - secretsmanager:GetSecretValue
+          - s3:GetObject
+          - s3:PutObject
           Resource:
-          - Ref: MainSecretArn
+            Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          MAIN_SECRET_ARN:
-            Ref: MainSecretArn
-          UPSTASH_REDIS_REST_URL:
-            Ref: UpstashRedisRestUrl
-          UPSTASH_REDIS_REST_TOKEN:
-            Ref: UpstashRedisRestToken
-          RUNPOD_API_KEY:
-            Ref: RunPodApiKey
-          RUNPOD_ENDPOINT_ID:
-            Ref: RunPodEndpointId
-          WORKER_URLS:
-            Ref: WorkerUrls
-          WORKER_B_QSTASH_URL:
-            Ref: WorkerBQStashUrl
-          WORKER_C_URL:
-            Ref: WorkerCUrl
-          QSTASH_TOKEN:
-            Ref: QStashToken
-          MAX_ACTIVE_SLOTS:
-            Ref: MaxActiveSlots
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
             Ref: UserRequestTable
           S3_RESOURCE_BUCKET:
             Ref: S3ResourceBucketName
-          USE_PROMPT_REFACTOR:
-            Ref: UsePromptRefactor
-      Events:
-        WorkerBInvoke:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /worker-b
-            Method: post
-            Auth:
-              Authorizer: NONE
-    Metadata:
-      SamResourceId: WorkerBFunction
-  WorkerCFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/
-      Handler: workerC.handler
-      Runtime: nodejs22.x
-      Timeout: 30
-      MemorySize: 256
-      Architectures:
-      - x86_64
-      Policies:
-      - DynamoDBCrudPolicy:
-          TableName:
-            Ref: UserRequestTable
-      Environment:
-        Variables:
+          GCS_BUCKET:
+            Ref: GcsBucket
+          VEO_VIDEO_DURATION_SECONDS:
+            Ref: VeoVideoDurationSeconds
+          FREE_TRIAL_BACKEND:
+            Ref: FreeTrialBackend
           UPSTASH_REDIS_REST_URL:
             Ref: UpstashRedisRestUrl
           UPSTASH_REDIS_REST_TOKEN:
             Ref: UpstashRedisRestToken
-          WORKER_B_QSTASH_URL:
-            Ref: WorkerBQStashUrl
-          QSTASH_TOKEN:
-            Ref: QStashToken
-          USER_REQUEST_TABLE_NAME:
-            Ref: UserRequestTable
-      Events:
-        WorkerCWebhook:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /worker-c
-            Method: post
-            Auth:
-              Authorizer: NONE
     Metadata:
-      SamResourceId: WorkerCFunction
-  DummyWorkerFunction:
-    Type: AWS::Serverless::Function
-    Condition: IsDevEnvironment
-    Properties:
-      CodeUri: src/
-      Handler: dummyWorker.handler
-      Runtime: nodejs22.x
-      Timeout: 15
-      MemorySize: 256
-      Architectures:
-      - x86_64
-      Events:
-        DummyWorkerInvoke:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /dummy-worker
-            Method: post
-            Auth:
-              Authorizer: NONE
-    Metadata:
-      SamResourceId: DummyWorkerFunction
+      SamResourceId: FreeTrialWorkerFunction
   ComfyUIWorkerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -772,13 +743,16 @@ Resources:
         Statement:
         - Effect: Allow
           Action:
-          - secretsmanager:GetSecretValue
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
           Resource:
-          - Ref: MainSecretArn
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          MAIN_SECRET_ARN:
-            Ref: MainSecretArn
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
             Ref: UserRequestTable
           STATUS_CREATED_INDEX_NAME: StatusCreatedIndex
@@ -861,16 +835,19 @@ Resources:
           Statement:
             - Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
+                - ssm:GetParameter
+                - ssm:GetParameters
+                - ssm:GetParametersByPath
               Resource:
-                - !Ref MainSecretArn
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
           S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
           VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
-          MAIN_SECRET_ARN: !Ref MainSecretArn
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
       Events:
         HourlyCronEvent:
           Type: Schedule
@@ -910,23 +887,10 @@ Outputs:
         - Fn::Sub: https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
       - "(UserPoolDomain tidak aktif \u2014 set ProvisionCognitoUserPoolDomain=true\
         \ lalu deploy)"
-  DummyWorkerUrl:
-    Description: URL for the Dummy Worker (use this in WorkerUrls for testing)
-    Condition: IsDevEnvironment
-    Value:
-      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/dummy-worker
   WorkerAUrl:
     Description: Base URL for Worker A (Main API /resource endpoint)
     Value:
       Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}
-  WorkerBUrl:
-    Description: URL for Worker B (Gatekeeper, called by QStash)
-    Value:
-      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/worker-b
-  WorkerCUrl:
-    Description: URL for Worker C (Finish Line, called by external worker)
-    Value:
-      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/worker-c
   ComfyUIWorkerArn:
     Description: ARN for the ComfyUI Worker Lambda
     Value:
@@ -937,3 +901,9 @@ Outputs:
     Description: Webhook URL for ComfyUI Cloud results
     Value:
       Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/comfyui-webhook
+  LambdaGcpBucketWebhookUrl:
+    Description: Webhook URL for GCP Pub/Sub fileCreated push
+    Value:
+      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/gcp/bucket-webhook
+
+# sam build && sam deploy --config-env production --profile production

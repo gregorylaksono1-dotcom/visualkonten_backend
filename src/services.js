@@ -349,7 +349,12 @@ const callGeminiAudio = async (text, config) => {
     const modelId = "gemini-3.1-flash-tts-preview";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
 
-    let voiceName = config?.voice_name || "Aoede";
+    const { DEFAULT_VOICE_BY_GENDER } = require("./lib/resolve-voice");
+    let voiceName = config?.voice_name;
+    if (!voiceName) {
+      const gender = String(config?.gender || "").toLowerCase();
+      voiceName = DEFAULT_VOICE_BY_GENDER[gender] || DEFAULT_VOICE_BY_GENDER.female;
+    }
     if (typeof voiceName === "object" && voiceName.S) {
       voiceName = voiceName.S;
     }

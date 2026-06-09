@@ -12,6 +12,23 @@ const {
 const { graphToApiPrompt } = require("../lib/comfy-graph-to-api-prompt");
 const { buildLtxPromptFields } = require("../lib/build-ltx-prompt");
 
+const DEFAULT_ANTI_STUDIO_NEGATIVE =
+  "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry";
+
+function resolveTalentImageNegative(llmResponse) {
+  return (
+    String(llmResponse?.talent_identity?.image_negative_avoid || "").trim() ||
+    String(llmResponse?.meta?.image_generation?.anti_studio_negative || "").trim() ||
+    DEFAULT_ANTI_STUDIO_NEGATIVE
+  );
+}
+
+function appendAvoidNegative(prompt, negative) {
+  const neg = String(negative || "").trim();
+  if (!neg) return prompt;
+  return `${String(prompt || "").trim()}. Avoid: ${neg}.`;
+}
+
 function resolveSceneTalkvid(scene) {
   if (scene.talkvid === false) return false;
   if (scene.scene_type === "reveal_demo" || scene.scene_type === "product_hero") {
@@ -50,9 +67,12 @@ async function generateMultiScenePipeline(params) {
       size = "1024x1024";
     }
 
-    const scenes = llmResponse.scenes || [];
+    let scenes = llmResponse.scenes || [];
     if (!Array.isArray(scenes) || scenes.length === 0) {
       throw new Error("No scenes found in LLM response for UGC-P multi-scene generation.");
+    }
+    if (requestType === "FREE-TRIAL") {
+      scenes = scenes.slice(0, 2);
     }
 
     const generatedScenes = [];
@@ -63,7 +83,11 @@ async function generateMultiScenePipeline(params) {
     let talentS3Key = null;
 
     if (requestType !== "FREE-TRIAL") {
-      const talentPrompt = llmResponse.talent_identity?.prompt || "Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, friendly everyday UGC creator, chest-up portrait, soft natural window daylight, real smartphone photo, natural skin texture, photorealistic UGC style";
+      const talentNegative = resolveTalentImageNegative(llmResponse);
+      let talentPrompt =
+        llmResponse.talent_identity?.prompt ||
+        "Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, friendly everyday UGC creator, chest-up portrait, soft natural window daylight, real smartphone photo, natural skin texture, photorealistic UGC style";
+      talentPrompt = appendAvoidNegative(talentPrompt, talentNegative);
       console.log(`[MultiSceneGen] Generating talent image with prompt: "${talentPrompt.slice(0, 60)}..."`);
       const { buffer: talentBuffer, fallbackUrl: talentFallbackUrl } = await callOpenAIImageEdit({
         apiKey,
@@ -94,40 +118,42 @@ async function generateMultiScenePipeline(params) {
       const scene = scenes[i];
       const sceneId = scene.scene_id || (i + 1);
 
-      if (scene.consistency?.generate_first_frame === false) {
-        // Skip image generation, use the user uploaded talent image directly (currentS3ImageUrls[0])
-        const imageUrl = currentS3ImageUrls[0];
-        console.log(`[MultiSceneGen] Scene ${sceneId} generate_first_frame is false. Using user uploaded image directly: ${imageUrl}`);
-        const comfyImageName = await uploadInputImage(imageUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
+      if (requestType === "FREE-TRIAL") {
+        let scenePrompt = "";
+        let sceneReferenceUrls = [];
 
-        generatedScenes.push({
-          scene_id: sceneId,
-          s3_key: null,
-          url: imageUrl,
-          comfy_image_name: comfyImageName
-        });
-        sceneImageFilenames.push(comfyImageName);
-      } else {
-        // Generate scene first frame
-        let scenePrompt = scene.image_prompt || finalJobPrompt;
-        const negativePrompt = String(scene.negative_prompt || "").trim();
-        if (negativePrompt) {
-          scenePrompt = `${scenePrompt.trim()}. Avoid: ${negativePrompt}.`;
-        }
-        console.log(`[MultiSceneGen] Generating image for Scene ${sceneId}: "${scenePrompt.slice(0, 80)}..."`);
-
-        const useModelRef = scene.consistency?.use_model_reference !== false;
-        let sceneReferenceUrls;
-        if (requestType === "FREE-TRIAL") {
-          sceneReferenceUrls = useModelRef
-            ? currentS3ImageUrls
-            : currentS3ImageUrls.slice(1);
+        if (i === 0) {
+          // Scene 1: Talent image generation using all fields from talent_identity
+          const tid = llmResponse.talent_identity || {};
+          const parts = [];
+          if (tid.prompt) parts.push(tid.prompt);
+          if (tid.gender) parts.push(`gender: ${tid.gender}`);
+          if (tid.age_range) parts.push(`age range: ${tid.age_range}`);
+          if (tid.outfit_lock) parts.push(`outfit: ${tid.outfit_lock}`);
+          if (tid.hair_lock) parts.push(`hair style: ${tid.hair_lock}`);
+          if (tid.ethnicity) parts.push(`ethnicity: ${tid.ethnicity}`);
+          
+          if (parts.length === 0) {
+            parts.push("UGC talent portrait");
+          }
+          scenePrompt = appendAvoidNegative(
+            parts.join(", "),
+            resolveTalentImageNegative(llmResponse)
+          );
+          // Use user's uploaded talent image as reference (OpenAI edit API requires at least one image)
+          sceneReferenceUrls = currentS3ImageUrls[0] ? [currentS3ImageUrls[0]] : [];
         } else {
-          sceneReferenceUrls = useModelRef
-            ? [generatedTalentImageUrl, ...currentS3ImageUrls]
-            : currentS3ImageUrls;
+          // Scene 2: Product image generation using scenes[1].image_prompt (or fallback to scene.image_prompt)
+          scenePrompt = scene.image_prompt || finalJobPrompt;
+          scenePrompt = appendAvoidNegative(
+            scenePrompt,
+            scene.negative_prompt || resolveTalentImageNegative(llmResponse)
+          );
+          // Reference is both talent image (currentS3ImageUrls[0]) and product image (currentS3ImageUrls[1]) if available
+          sceneReferenceUrls = [currentS3ImageUrls[0], currentS3ImageUrls[1]].filter(Boolean);
         }
 
+        console.log(`[MultiSceneGen] [FREE-TRIAL] Generating image for Scene ${sceneId}: "${scenePrompt.slice(0, 80)}..."`);
         const { buffer, fallbackUrl } = await callOpenAIImageEdit({
           apiKey,
           prompt: scenePrompt,
@@ -147,7 +173,6 @@ async function generateMultiScenePipeline(params) {
         const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
         const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
 
-        // 2. Upload to ComfyUI Cloud
         console.log(`[MultiSceneGen] Uploading Scene ${sceneId} image to ComfyUI Cloud...`);
         const comfyImageName = await uploadInputImage(signedUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
 
@@ -159,6 +184,67 @@ async function generateMultiScenePipeline(params) {
         });
 
         sceneImageFilenames.push(comfyImageName);
+
+      } else {
+        if (scene.consistency?.generate_first_frame === false) {
+          // Skip image generation, use the user uploaded talent image directly (currentS3ImageUrls[0])
+          const imageUrl = currentS3ImageUrls[0];
+          console.log(`[MultiSceneGen] Scene ${sceneId} generate_first_frame is false. Using user uploaded image directly: ${imageUrl}`);
+          const comfyImageName = await uploadInputImage(imageUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
+
+          generatedScenes.push({
+            scene_id: sceneId,
+            s3_key: null,
+            url: imageUrl,
+            comfy_image_name: comfyImageName
+          });
+          sceneImageFilenames.push(comfyImageName);
+        } else {
+          // Generate scene first frame
+          let scenePrompt = scene.image_prompt || finalJobPrompt;
+          const negativePrompt = String(scene.negative_prompt || "").trim();
+          if (negativePrompt) {
+            scenePrompt = `${scenePrompt.trim()}. Avoid: ${negativePrompt}.`;
+          }
+          console.log(`[MultiSceneGen] Generating image for Scene ${sceneId}: "${scenePrompt.slice(0, 80)}..."`);
+
+          const useModelRef = scene.consistency?.use_model_reference !== false;
+          const sceneReferenceUrls = useModelRef
+            ? [generatedTalentImageUrl, ...currentS3ImageUrls]
+            : currentS3ImageUrls;
+
+          const { buffer, fallbackUrl } = await callOpenAIImageEdit({
+            apiKey,
+            prompt: scenePrompt,
+            size,
+            referenceUrls: sceneReferenceUrls
+          });
+
+          const s3Key = `${folder}/${userId || "anonymous"}/${jobId}_scene_${sceneId}.png`;
+
+          await s3.send(new PutObjectCommand({
+            Bucket: S3_RESOURCE_BUCKET,
+            Key: s3Key,
+            Body: buffer,
+            ContentType: "image/png"
+          }));
+
+          const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
+          const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
+
+          // 2. Upload to ComfyUI Cloud
+          console.log(`[MultiSceneGen] Uploading Scene ${sceneId} image to ComfyUI Cloud...`);
+          const comfyImageName = await uploadInputImage(signedUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
+
+          generatedScenes.push({
+            scene_id: sceneId,
+            s3_key: s3Key,
+            url: signedUrl,
+            comfy_image_name: comfyImageName
+          });
+
+          sceneImageFilenames.push(comfyImageName);
+        }
       }
     }
 
@@ -185,14 +271,15 @@ async function generateMultiScenePipeline(params) {
       else { w = 720; h = 1280; } // 9:16
     }
 
-    // Calculate total duration from scenes first, and maximize the last scene if total < 20s
+    // Calculate total duration from scenes first, and maximize the last scene if total < targetMinDuration
     let totalSceneDuration = 0;
     for (let i = 0; i < scenes.length; i++) {
       totalSceneDuration += Number(scenes[i].duration_seconds || 4);
     }
 
-    if (totalSceneDuration < 20 && scenes.length > 0) {
-      const diff = 20 - totalSceneDuration;
+    const targetMinDuration = requestType === "FREE-TRIAL" ? 10 : 20;
+    if (totalSceneDuration < targetMinDuration && scenes.length > 0) {
+      const diff = targetMinDuration - totalSceneDuration;
       const lastIndex = scenes.length - 1;
       const originalDuration = Number(scenes[lastIndex].duration_seconds || 4);
       scenes[lastIndex].duration_seconds = originalDuration + diff;

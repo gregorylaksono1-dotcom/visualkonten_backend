@@ -570,22 +570,30 @@ Metadata & QA. Scene 3 mengandalkan **product reference** + `product_identity`, 
 | Field | Aturan |
 |-------|--------|
 | `ethnicity` | **Default `"Indonesian"`** — isi eksplisit di setiap response |
-| `talent_identity.prompt` | **Wajib** menyebut etnis + fitur: `Indonesian [woman/man]`, `Southeast Asian facial features`, `warm brown skin typical of Indonesian people`, `natural Indonesian appearance` |
+| `talent_identity.prompt` | **Wajib** menyebut etnis + fitur: `Indonesian [woman/man]`, `Southeast Asian facial features`, `warm brown skin typical of Indonesian people`, `natural Indonesian appearance`, `real smartphone UGC`, `natural skin texture` — **bukan** glamour/model profesional |
+| `talent_identity.image_negative_avoid` | **Wajib terisi** — blok anti-tabloid/studio (lihat bawah); dipakai backend saat generate portrait talent (step 1) |
 | `image_prompt` scene 1–2 | Tambah singkat di `SCENE`: `Indonesian talent with natural Southeast Asian features` (jika ada wajah) |
-| `negative_prompt` scene 1–2 | Tambah: `caucasian, european, western model, pale white skin, blonde hair, blue eyes, korean idol aesthetic, japanese anime face, east asian celebrity look` |
+| `negative_prompt` scene 1–3 | **Wajib** gabungkan blok global + `anti_studio_negative` + tambahan per scene |
+| `negative_prompt` scene 1–2 (etnis) | Tambah: `caucasian, european, western model, pale white skin, blonde hair, blue eyes, korean idol aesthetic, japanese anime face, east asian celebrity look` |
+
+**`talent_identity.image_negative_avoid` & `scenes[].negative_prompt` — anti-tabloid / anti-studio (wajib image gen):**
+
+```text
+stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry
+```
 
 **Backend step 1:** portrait talent digenerate dari `talent_identity.prompt` — jika prompt tidak menyebut etnis Indonesia, model cenderung drift ke wajah non-Indonesia.
 
 **Contoh `talent_identity.prompt` (wanita, hijab-friendly):**
 
 ```text
-Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, ideal well-proportioned physique, soft dark brown hair under a simple neutral hijab, wearing a plain cream ribbed top, friendly compelling UGC creator, chest-up portrait, soft natural window daylight, real smartphone photo, natural skin texture
+Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, ideal well-proportioned physique, soft dark brown hair under a simple neutral hijab, wearing a plain cream ribbed top, friendly everyday UGC creator, chest-up portrait, soft natural window daylight, real smartphone UGC photo, natural skin texture, authentic not glamour
 ```
 
 **Contoh `talent_identity.prompt` (pria):**
 
 ```text
-Indonesian man in his late twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, short black hair, plain neutral t-shirt, friendly everyday UGC reviewer, chest-up portrait, soft natural daylight, real smartphone photo
+Indonesian man in his late twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, short black hair, plain neutral t-shirt, friendly everyday UGC reviewer, chest-up portrait, soft natural daylight, real smartphone UGC photo, natural skin texture, authentic not glamour
 ```
 
 **Wearable — tubuh talent (scene 2 full body):** `talent_identity.prompt` tambahkan `ideal well-proportioned physique`, `flattering silhouette` — talent terlihat **compelling** saat memakai produk, bukan pose candid/slouchy.
@@ -657,6 +665,7 @@ Output:
   "real_photo_rules": "Real smartphone capture. Handheld framing. Natural skin texture. Slightly imperfect composition.",
   "full_body_talent_rules": "Ideal well-proportioned physique, compelling confident pose, flattering silhouette — scene 2 reveal wearable only",
   "real_photo_avoid": "Not stock photography. Not studio photography. Not commercial campaign. Not magazine style. Not AI aesthetic.",
+  "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry",
   "talent_ethnicity_default": "Indonesian — Southeast Asian facial features, warm brown skin, natural Indonesian appearance",
   "ltx_first_frame_rules": "Center composition, consistent lighting, simple background, no text/signage"
 }
@@ -685,7 +694,13 @@ Setiap `image_prompt` (scene 1–3) **wajib** mengarah ke foto seperti **hasil k
 **Wajib sertakan di `SCENE` atau `negative_prompt` (larangan gaya):**
 
 ```text
-Not stock photography. Not studio photography. Not commercial campaign. Not magazine style. Not AI aesthetic.
+Not stock photography. Not studio photography. Not commercial campaign. Not magazine style. Not AI aesthetic. Not catalog photo. Not glamour portrait. Not tabloid photo.
+```
+
+**Wajib di `scenes[].negative_prompt` + `talent_identity.image_negative_avoid` (image gen API):**
+
+```text
+stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry
 ```
 
 **Template frasa penutup `SCENE` (copy-paste):**
@@ -763,10 +778,12 @@ REFERENCE IMAGES: The first attached image is the talent (model) reference — k
 SCENE: One single full-frame photograph. Cozy lived-in bedroom with soft natural window daylight and a faint warm lamp glow in the background. Medium close-up chest-up, subject centered, shallow depth of field. The talent wears a simple neutral everyday top (cream or beige ribbed knit) and plain hijab — NOT the product tunik. Direct eye contact with the camera, eyes locked on lens. Mid-speech expression: mouth slightly open as if speaking, playful skeptical eyebrows, one natural hand gesture toward camera. Real smartphone capture, handheld framing, natural skin texture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. Wooden shelf with small plants softly blurred behind. No on-screen text, UI, or watermark.
 ```
 
-**`negative_prompt` scene 1 tambahan (anti-perfect):**
+**`negative_prompt` scene 1 tambahan (anti-perfect + anti-tabloid):**
+
+Gabungkan `anti_studio_negative` +:
 
 ```text
-studio lighting, beauty retouch, airbrushed skin, flawless skin, porcelain skin, fashion catalog, editorial pose, stock photo, symmetrical influencer pose, big staged smile, waving at camera, empty gray wall, sterile minimalist room, glossy fabric, 3D render, CGI, overly saturated, plastic skin, perfect symmetry, professional studio backdrop, looking away from camera, eyes averted, looking down, side glance, off-camera gaze
+fashion catalog, symmetrical influencer pose, big staged smile, waving at camera, empty gray wall, sterile minimalist room, glossy fabric, overly saturated, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, side glance, off-camera gaze
 ```
 
 ### `SCENE` — scene 3 product hero (template)
@@ -788,10 +805,10 @@ SCENE: One single full-frame photograph. [environment_lock], soft natural daylig
 ## `negative_prompt` (semua scene)
 
 ```text
-panel layout, split screen, collage, text, signage, watermark, UI, shopping cart icon, distorted hands, extra fingers, changing product color or shape, morphing, distortion, warping, flicker, jitter, blur, artifacts, deformed, tiny distant subject, extreme macro, busy cluttered background, stock photography, studio photography, commercial campaign, magazine style, AI aesthetic, beauty retouch, airbrushed skin, flawless skin, professional studio lighting, catalog look, editorial fashion, candid snapshot, casual snapshot, slouchy posture, unflattering body, awkward pose, caucasian, european, western model, pale white skin, blonde hair, blue eyes, korean idol aesthetic, japanese anime face, east asian celebrity look
+panel layout, split screen, collage, text, signage, watermark, UI, shopping cart icon, distorted hands, extra fingers, changing product color or shape, morphing, distortion, warping, flicker, jitter, blur, artifacts, deformed, tiny distant subject, extreme macro, busy cluttered background, stock photo, catalog photo, stock photography, studio lighting, studio photography, commercial photography, commercial campaign, beauty retouching, beauty retouch, airbrushed skin, flawless skin, magazine shoot, magazine style, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, porcelain skin, professional studio lighting, professional studio backdrop, catalog look, editorial fashion, editorial pose, AI aesthetic, candid snapshot, casual snapshot, slouchy posture, unflattering body, awkward pose, caucasian, european, western model, pale white skin, blonde hair, blue eyes, korean idol aesthetic, japanese anime face, east asian celebrity look, plastic skin, perfect symmetry, symmetrical influencer pose
 ```
 
-**Scene 1 talking head tambahan (anti-AI-perfect):** `studio lighting, beauty retouch, airbrushed skin, flawless skin, fashion catalog, editorial pose, stock photo, symmetrical influencer pose, empty gray wall, sterile room, 3D render, CGI, plastic skin, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, off-camera gaze`
+**Scene 1 talking head tambahan (anti-AI-perfect):** `fashion catalog, stock photo, big staged smile, waving at camera, empty gray wall, sterile room, sterile minimalist room, glossy fabric, overly saturated, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, side glance, off-camera gaze`
 
 Scene 3 tambahan: `person, face, hands, human, model, talent`
 
@@ -1094,7 +1111,8 @@ SCENE: One single full-frame photograph. Same bedroom as other scenes, soft natu
         "image_3": "product_secondary_optional"
       },
       "product_hero_scene_id": 3,
-      "product_hero_attach": "product_only"
+      "product_hero_attach": "product_only",
+      "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry"
     },
     "ltx_generation": {
       "model": "ltx-2.3",
@@ -1127,6 +1145,7 @@ SCENE: One single full-frame photograph. Same bedroom as other scenes, soft natu
   },
   "talent_identity": {
     "prompt": "",
+    "image_negative_avoid": "",
     "ethnicity": "Indonesian",
     "gender": "male",
     "age_range": "",
@@ -1325,9 +1344,10 @@ for each scene in scenes:
 
 clips = []
 for scene in scenes sorted by scene_id:
-  has_talkvid = scene.talkvid === true
-    || scene.audio_segments?.some(s => s.talkvid === true || s.mode === "talking_head")
-    || false
+  has_talkvid = scene.talkvid !== false
+    && scene.scene_type not in ["reveal_demo", "product_hero"]
+    && (scene.talkvid === true
+      || scene.audio_segments?.some(s => s.talkvid === true || s.mode === "talking_head"))
   built = buildLtxPromptFields(scene)  // strip TikTok/UGC; move negations → ltx_negative_prompt
   clip = LTX_I2V {
     init_image: first_frame[scene_id],
@@ -1393,6 +1413,7 @@ assert voiceover_script.tts_script.startsWith("[fast] ")
 - [ ] **`image_prompt` real smartphone UGC:** `Real smartphone capture`, `handheld framing`, `natural skin texture` (scene 1–2), `slightly imperfect composition` — **tanpa** `candid` / `casual snapshot`  
 - [ ] **Wearable scene 2 reveal full body:** `ideal well-proportioned physique`, `compelling confident pose`, `flattering silhouette` — bukan slouchy/candid try-on  
 - [ ] **`image_prompt` / `negative_prompt` anti-komersial:** not stock/studio/commercial campaign/magazine/AI aesthetic  
+- [ ] **`talent_identity.image_negative_avoid` + `scenes[].negative_prompt`:** blok `anti_studio_negative` terisi (stock photo, catalog photo, studio lighting, glamour portrait, CGI, 3D render, tabloid, dll.)  
 - [ ] `ltx_prompt` Inggris, 4–6 kalimat, satu aksi, static atau slow push-in  
 - [ ] `voiceover_script` dibuka **punch line** pantun/gombalan **lucu bodoh** (5–8 kata); `hook_concept` = `pantun_lucu_hook` / `gombalan_bodoh_hook`  
 - [ ] **`skeptic_bridge_opener` terisi** — pembuka jembatan **bukan** default `Jujur` kecuali sengaja jarang; variasi dari pool  

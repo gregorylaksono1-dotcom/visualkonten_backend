@@ -28,6 +28,7 @@ const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
 const { generateUgcLlmResponse } = require("./core/ugcLlm");
 const { generateMultiScenePipeline } = require("./core/multiSceneGeneration");
+const { buildTtsGlobalConfig, syncGenderFields } = require("./lib/resolve-voice");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 // const COMFY_BASE_URL = "http://34.81.171.110:8188";
@@ -172,15 +173,17 @@ const handleSubmission = async (event) => {
               llmResponse.tts_word_count = llmResponse.voiceover_script.word_count;
             }
           }
-          if (llmResponse.voice_profile && typeof llmResponse.voice_profile === "object") {
-            if (!llmResponse.tts_global_config) {
-              llmResponse.tts_global_config = {
-                voice_name: llmResponse.voice_profile.voice_name || "Aoede",
-                speaking_rate: llmResponse.voice_profile.speaking_rate ?? 1.0,
-                pitch: llmResponse.voice_profile.pitch ?? 0.0,
-              };
-            }
+          syncGenderFields(llmResponse);
+          llmResponse.tts_global_config = buildTtsGlobalConfig(llmResponse, {
+            voiceSelectionMode: event.voice_selection_mode || llmResponse.meta?.voice_selection_mode,
+            preferredVoice: event.preferred_voice || llmResponse.meta?.preferred_voice,
+          });
+          if (llmResponse.voiceover_script && llmResponse.tts_global_config?.voice_name) {
+            llmResponse.voiceover_script.voice_name = llmResponse.tts_global_config.voice_name;
           }
+          console.log(
+            `[Worker] TTS voice resolved: gender=${llmResponse.tts_global_config.gender}, voice=${llmResponse.tts_global_config.voice_name}`
+          );
 
           finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
 
@@ -197,7 +200,10 @@ const handleSubmission = async (event) => {
           let ttsResult = null;
           const hasTtsScript = !!llmResponse.tts_script;
           if (hasTtsScript) {
-            const ttsGlobalConfig = llmResponse.tts_global_config || { voice_name: "Aoede", speaking_rate: 1.0, pitch: 0.0 };
+            const ttsGlobalConfig = llmResponse.tts_global_config || buildTtsGlobalConfig(llmResponse, {
+              voiceSelectionMode: event.voice_selection_mode,
+              preferredVoice: event.preferred_voice,
+            });
             ttsResult = await generateTTS({
               jobId,
               userEmail,

@@ -150,7 +150,87 @@ Punch line = **5–8 kata**; sisanya jembatan skeptis singkat + benefit + CTA da
 
 ### `voice_name` & pemilihan suara
 
-Sama seperti `ugc.md` — `gender` = `talent_identity.gender`; `voice_name` ∈ `allowed_voices[gender]`; jangan default Puck/Aoede tanpa alasan; isi `voice_selection_rationale`.
+Lihat section **Konsistensi gender talent & suara** di bawah — aturan lengkap.
+
+---
+
+## Konsistensi gender talent & suara (wajib trial)
+
+**Masalah umum:** talent pria di `talent_image` user, tapi TTS pakai suara wanita (mis. Aoede) — **tidak boleh**.
+
+### Sumber kebenaran gender
+
+| Prioritas | Sumber | Aturan |
+|-----------|--------|--------|
+| 1 | **`talent_image` user** (layar 1) | LLM **wajib** analisis visual upload **sebelum** isi gender — ini **sumber utama** |
+| 2 | `product_description` | Hanya jika upload tidak jelas — jangan override gender yang terlihat di foto |
+
+**`meta.talent_gender_source`:** wajib `"user_talent_upload"`.
+
+### Lock gender (wajib sinkron)
+
+| Field | Aturan |
+|-------|--------|
+| `talent_identity.gender` | **`male`** atau **`female`** — dari analisis `talent_image` |
+| `voiceover_script.gender` | **Harus identik** dengan `talent_identity.gender` |
+| `talent_identity.gender_inferred_from` | Wajib — 1 kalimat QA, mis. *"Male presenter in user upload — short hair, visible beard shadow"* |
+| `talent_identity.prompt` | Wajib sebut **`Indonesian man`** atau **`Indonesian woman`** sesuai gender — **bukan** lawan katanya |
+| `talent_identity.hair_lock` | Deskripsi rambut/hijab **selaras gender** di foto upload |
+
+**Larangan keras:**
+
+| ❌ Dilarang | ✅ Benar |
+|-----------|---------|
+| Upload pria + `gender: female` | Upload pria → `gender: male` + suara dari pool pria |
+| Upload wanita + `voice_name: Puck` | Upload wanita → `voice_name` ∈ pool wanita |
+| Default `Aoede` tanpa cek gender | Pilih suara **hanya** dari `allowed_voices[gender]` |
+| `prompt`: *Indonesian woman* padahal upload pria | `prompt` match gender upload |
+
+### `voice_name` vs `talent_identity.gender` (wajib)
+
+`voiceover_script.gender` **harus sama** dengan `talent_identity.gender`.  
+`voiceover_script.voice_name` **wajib** salah satu dari daftar di bawah — **bukan** nama lain.
+
+**If `gender` = `male`** — allowed voices:
+
+`Puck`, `Charon`, `Fenrir`, `Achird`, `Iapetus`, `Algenib`
+
+**If `gender` = `female`** — allowed voices:
+
+`Aoede`, `Kore`, `Achernar`, `Callirrhoe`, `Despina`, `Gacrux`
+
+| `gender` | `voice_name` (pilih tepat satu) |
+|----------|----------------------------------|
+| `male` | Puck, Charon, Fenrir, Achird, Iapetus, Algenib |
+| `female` | Aoede, Kore, Achernar, Callirrhoe, Despina, Gacrux |
+
+### Pemilihan suara — jangan selalu Puck / Aoede
+
+**Dilarang** memakai Puck (pria) / Aoede (wanita) sebagai default tanpa alasan tone.
+
+| `voice_selection_mode` | Siapa memilih | Perilaku |
+|------------------------|---------------|----------|
+| `llm_cast` | LLM (default) | Pilih **tepat satu** suara dari `allowed_voices[gender]` sesuai tone UGC. **Variasi wajib.** |
+| `random` | Backend | Override `voice_name` dengan random dari `allowed_voices[gender]` sebelum TTS. |
+| `user_pick` | User/UI | Pakai `preferred_voice` dari input; harus ∈ `allowed_voices[gender]`. |
+
+**LLM (`llm_cast`) — casting by tone:**
+
+| Tone / kategori | `male` (pilih satu) | `female` (pilih satu) |
+|-----------------|---------------------|------------------------|
+| Conversational hangat | Charon, Iapetus, Achird | Kore, Callirrhoe, Achernar |
+| Playful / punch line gombalan | Puck, Fenrir | Aoede, Gacrux |
+| Tenang / dipercaya | Iapetus, Charon, Algenib | Despina, Callirrhoe |
+| Energetic / fashion | Fenrir, Puck, Achird | Kore, Gacrux, Aoede |
+| Confident CTA | Fenrir, Achird | Achernar, Kore |
+
+Isi `voiceover_script.voice_selection_rationale` — 1 kalimat; **wajib** sebut gender + alasan tone.
+
+**Backend TTS (wajib):**
+1. Ambil `gender` dari `talent_identity.gender` (fallback `voiceover_script.gender`)
+2. Resolve `voice_name` per `voice_selection_mode`
+3. **Validasi** `voice_name ∈ allowed_voices[gender]` — jika tidak match, **ganti** ke suara valid gender yang sama (jangan default Aoede untuk pria)
+4. Render `POST TTS { voice_name, script: tts_script }`
 
 ---
 
@@ -236,9 +316,18 @@ Frasa wajib `ltx_prompt`: `semi close-up product hero shot, product centered, so
 
 ## `talent_identity` & `product_identity`
 
-- `talent_identity` — isi dari analisis + asumsi dari konteks trial (gender untuk voice); **tidak** drive image gen scene 1 (user upload)  
-- `ethnicity`: default **`Indonesian`** — meski scene 1 pakai upload user, metadata tetap deskripsikan talent sebagai orang Indonesia untuk konsistensi voice/konteks UGC lokal  
+- `talent_identity` — **gender wajib dari analisis `talent_image` user** — sinkron dengan `voiceover_script.gender` & `voice_name`  
+- `gender_inferred_from` — wajib; 1 kalimat bukti visual dari upload  
+- `ethnicity`: default **`Indonesian`**  
+- `talent_identity.prompt` — `Indonesian man` **atau** `Indonesian woman` (match gender upload), `real smartphone UGC`, `natural skin texture`  
+- `talent_identity.image_negative_avoid` — **wajib terisi** (konsistensi QA; scene 2 image gen pakai blok sama)  
 - `product_identity` — wajib untuk scene 2 image gen & `ltx_prompt`
+
+**`anti_studio_negative` — wajib di `talent_identity.image_negative_avoid` & `scenes[1].negative_prompt` (image gen):**
+
+```text
+stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry
+```
 
 ---
 
@@ -267,7 +356,8 @@ Frasa wajib `ltx_prompt`: `semi close-up product hero shot, product centered, so
   "trial_scene_2_only": true,
   "single_frame_rule": "One continuous photograph. No panels, grids, collage.",
   "product_hero_framing": "Semi close-up product only — scene 2",
-  "talking_head_framing": "User upload — scene 1; LLM does not write image_prompt for scene 1"
+  "talking_head_framing": "User upload — scene 1; LLM does not write image_prompt for scene 1",
+  "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry"
 }
 ```
 
@@ -280,7 +370,7 @@ Bahasa **Inggris**. Struktur: `REFERENCE IMAGES` → `SCENE`. **Scene 1: `image_
 ```text
 REFERENCE IMAGES: The attached image is the product reference — keep the exact product shape, color, packaging, and labels identical. Do not add a person, hands, or face. Output one single continuous photograph only.
 
-SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] placed naturally on [product_hero_surface], product centered, slight 3/4 angle, clean background. Real smartphone capture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No person, no hands, not flat lay top-down. No text, UI, or watermark.
+SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] placed naturally on [product_hero_surface], product centered, slight 3/4 angle, clean background. Real smartphone capture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not catalog photo, not glamour portrait, not tabloid photo, not AI aesthetic. No person, no hands, not flat lay top-down. No text, UI, or watermark.
 ```
 
 **Produk 2 file:** tambahkan secondary reference untuk sudut/detail — sama pola `ugc.md`.
@@ -291,7 +381,17 @@ SCENE: One single full-frame photograph. [environment_lock], soft natural daylig
 
 **Scene 1** (LTX): artefak wajah + `panel layout, text, UI, watermark, distorted hands, morphing, warping, flicker, extreme close-up`
 
-**Scene 2** (image + LTX): gabungan `ugc2` scene 3 product hero + `person, face, hands, human, model, talent, folded clothes` (jika apparel) + `stock photography, studio photography, commercial campaign, magazine style, AI aesthetic, catalog look`
+**Scene 2** (image gen + LTX) — wajib gabungkan:
+
+1. Blok **`anti_studio_negative`** (lihat `talent_identity` di atas)
+2. Product hero: `person, face, hands, human, model, talent, folded clothes` (jika apparel)
+3. Layout/artefak: `panel layout, split screen, collage, text, signage, watermark, UI, flat lay top-down, extreme macro`
+
+**Contoh `scenes[1].negative_prompt` lengkap:**
+
+```text
+stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry, person, face, hands, human, model, talent, panel layout, text, UI, watermark, stock photography, commercial campaign, magazine style, AI aesthetic
+```
 
 ---
 
@@ -381,6 +481,7 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
     "environment_lock": "",
     "product_display_mode": "",
     "product_hero_surface": "",
+    "talent_gender_source": "user_talent_upload",
     "performance": {
       "emotion_tone": "playful → yakin singkat → tenang showcase",
       "energy_level": "medium-high",
@@ -404,7 +505,8 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "skip_talent_image_generation": true,
       "trial_scene_1_init": "user_talent_upload",
       "product_hero_scene_id": 2,
-      "product_hero_attach": "product_only"
+      "product_hero_attach": "product_only",
+      "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry"
     },
     "ltx_generation": {
       "model": "ltx-2.3",
@@ -433,8 +535,10 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
   },
   "talent_identity": {
     "prompt": "",
+    "image_negative_avoid": "",
     "ethnicity": "Indonesian",
     "gender": "male",
+    "gender_inferred_from": "",
     "age_range": "",
     "outfit_lock": "",
     "hair_lock": ""
@@ -548,7 +652,11 @@ for scene in scenes sorted by scene_id:
 final = ComfyUI_Stitch(clips, target_seconds: 10)
 
 // TTS (same voice resolve as ugc.md)
-POST TTS { voice_name, script: voiceover_script.tts_script }
+gender = talent_identity.gender || voiceover_script.gender
+assert talent_identity.gender == voiceover_script.gender
+voice = resolve_voice_name(llmResponse, voice_selection_mode, preferred_voice)
+assert voice in allowed_voices[gender]
+POST TTS { voice_name: voice, script: voiceover_script.tts_script }
 assert voiceover_script.tts_script.startsWith("[fast] ")
 assert word_count in [12, 18]
 ```
@@ -562,6 +670,7 @@ assert word_count in [12, 18]
 - [ ] **2 scenes**, sum duration = **10**, stitch target = **10**  
 - [ ] Scene 1: `trial_talent`, 5s, `talking_head`, `generate_first_frame: false`, `init_image_source: user_talent_upload`, `image_prompt: ""`  
 - [ ] Scene 2: `product_hero`, 5s, `b_roll`, `generate_first_frame: true`, produk saja, `use_model_reference: false`  
+- [ ] `talent_identity.image_negative_avoid` + scene 2 `negative_prompt`: blok `anti_studio_negative` terisi (anti tabloid/studio/glamour/CGI)  
 - [ ] `skip_talent_image_generation: true` di `meta`  
 - [ ] `voiceover_script` **12–18 kata**; punch line lucu bodoh; `tts_script` = `[fast] ` + `script`  
 - [ ] **`skeptic_bridge_opener` terisi** — variasi pembuka skeptis; **bukan** selalu `Jujur` / `Awalnya ragu`  
@@ -570,7 +679,12 @@ assert word_count in [12, 18]
 - [ ] Scene 1 `lip_sync_segment` kutip verbatim + `clear lip movement fully in sync`  
 - [ ] Scene 1 `ltx_prompt` positif saja; larangan di **`ltx_negative_prompt`**  
 - [ ] Scene 2 `ltx_prompt` positif; larangan person/hands di **`ltx_negative_prompt`**  
-- [ ] `voice_name` ∈ `allowed_voices[gender]`; `voice_selection_rationale` terisi  
+- [ ] **`talent_identity.gender` = `voiceover_script.gender`** — dari analisis **`talent_image` user**, bukan tebakan produk  
+- [ ] `talent_identity.gender_inferred_from` terisi (bukti visual upload)  
+- [ ] `talent_identity.prompt` pakai **`Indonesian man`** / **`Indonesian woman`** sesuai gender — bukan lawan katanya  
+- [ ] `voice_name` ∈ `allowed_voices[gender]` — **bukan** suara gender berlawanan (pria → bukan Aoede/Kore; wanita → bukan Puck/Charon)  
+- [ ] `voice_selection_rationale` terisi — sebut gender + tone  
+- [ ] `meta.talent_gender_source` = `user_talent_upload`  
 - [ ] No text/UI di visual prompts  
 - [ ] Klaim aman di script  
 

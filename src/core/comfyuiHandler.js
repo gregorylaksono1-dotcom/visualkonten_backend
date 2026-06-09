@@ -88,11 +88,13 @@ async function processComfyUICompletion(params) {
   // For image jobs, we just set generated_image.
   // For video jobs, we set result_url and status = COMPLETED.
   const updateExpr = isVideo
-    ? "SET result_url = :res, #s = :status, updated_at = :now"
-    : "SET generated_image = :res, updated_at = :now";
+    ? "SET result_url = :res, s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys), #s = :status, updated_at = :now"
+    : "SET generated_image = :res, s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys), updated_at = :now";
 
   const attrValues = {
     ":res": s3Key,
+    ":empty_list": [],
+    ":newKeys": [s3Key],
     ":now": getJakartaISOString()
   };
 

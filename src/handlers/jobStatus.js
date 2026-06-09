@@ -64,7 +64,8 @@ exports.handleBatchStatus = async (event) => {
                 credit_amount: item.credit_amount,
                 created_at: item.created_at,
                 updated_at: item.updated_at,
-                s3_keys: item.s3_keys || []
+                s3_keys: item.s3_keys || [],
+                llm_response: item.llm_response || null
             };
 
             // Sign Thumbnail (Flux Image)

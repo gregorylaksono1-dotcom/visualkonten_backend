@@ -32,6 +32,7 @@ exports.handler = async (event) => {
           user_type: "CUSTOMER",
           email: email || "",
           name,
+          free_trial: 1,
           created_at: getJakartaISOString(),
           updated_at: getJakartaISOString(),
         },

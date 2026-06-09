@@ -19,8 +19,9 @@ async function generateComfyUIVideo(params) {
     uuid, user_email, user_id, request_type,
     llm_response, audio, audio_duration,
     video_quality, aspect_ratio,
-    imageResultUrl, // first_frame / talent (or single image)
-    productFrameUrl, // last_frame for UGC-P 2-keyframe (optional)
+    imageResultUrl, // first_frame: reveal_start (PRODUCT) or talent (UGC-P) or single image
+    productFrameUrl, // last_frame: hero (PRODUCT) or product_frame (UGC-P)
+    transitionFrameUrl, // mid_frame (PRODUCT 3-keyframe, optional)
     used_api_key,
     dynamo, s3, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET
   } = params;
@@ -39,32 +40,64 @@ async function generateComfyUIVideo(params) {
 
   try {
     // 1. Get Signed URL for Audio (since ComfyUI needs to download it)
-    const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audioKey });
-    const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
+    let comfyAudioName = null;
+    if (audioKey && typeof audioKey === "string" && audioKey !== "null" && audioKey !== "undefined" && audioKey.trim() !== "") {
+      console.log(`[VideoGen] Getting signed URL for audio key: "${audioKey}"`);
+      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audioKey });
+      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
+      comfyAudioName = await uploadInputAudio(audioSignedUrl, `${jobId}_tts.wav`, usedApiKey);
+    } else {
+      console.log(`[VideoGen] No valid audio key provided. Skipping audio upload.`);
+    }
 
-    // 2. Upload to ComfyUI Cloud (ComfyUI prefers filenames of uploaded files)
+    // 2. Upload image to ComfyUI Cloud (ComfyUI prefers filenames of uploaded files)
     const comfyImageName = await uploadInputImage(imageResultUrl, `${jobId}_flux.png`, usedApiKey);
-    const comfyAudioName = await uploadInputAudio(audioSignedUrl, `${jobId}_tts.wav`, usedApiKey);
 
     // 3. Load Video Workflow JSON
-    const useTwoFrame =
+    const ig = llmResponse.image_generation || {};
+    const useProductThreeFrame =
+      request_type === "PRODUCT" &&
+      productFrameUrl &&
+      transitionFrameUrl &&
+      imageResultUrl &&
+      (ig.hero_frame || ig.transition_frame || ig.reveal_start_frame);
+
+    const useUgcTwoFrame =
       request_type === "UGC-P" &&
       productFrameUrl &&
-      (llmResponse.image_generation?.talent_frame || llmResponse.image_generation?.product_frame);
+      (ig.talent_frame || ig.product_frame);
 
-    const workflowFile = useTwoFrame
-      ? "ugc_talent_and_product (API).json"
-      : "Generate UGC Video With Voice Clone (API).json";
+    const workflowFile = useProductThreeFrame
+      ? "product_only_camera_movement (API).json"
+      : useUgcTwoFrame
+        ? "ugc_talent_and_product (API).json"
+        : "Generate UGC Video With Voice Clone (API).json";
 
     const workflowPath = path.join(__dirname, "..", "workflow", workflowFile);
     const videoWorkflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
 
     // 4. Populate Workflow Nodes
     
-    // Node 440: first_frame (talent or single image)
+    // Node 440: first_frame (reveal_start / talent / single image)
     if (videoWorkflow["440"]) videoWorkflow["440"].inputs.image = comfyImageName;
 
-    if (useTwoFrame && videoWorkflow["441"]) {
+    if (useProductThreeFrame && videoWorkflow["441"] && videoWorkflow["442"]) {
+      const comfyHeroName = await uploadInputImage(
+        productFrameUrl,
+        `${jobId}_hero_frame.png`,
+        usedApiKey
+      );
+      const comfyTransitionName = await uploadInputImage(
+        transitionFrameUrl,
+        `${jobId}_transition_frame.png`,
+        usedApiKey
+      );
+      videoWorkflow["441"].inputs.image = comfyHeroName;
+      videoWorkflow["442"].inputs.image = comfyTransitionName;
+      console.log(
+        `[VideoGen] 3-frame PRODUCT: 440=${comfyImageName}, 442=${comfyTransitionName}, 441=${comfyHeroName}`
+      );
+    } else if (useUgcTwoFrame && videoWorkflow["441"]) {
       const comfyProductName = await uploadInputImage(
         productFrameUrl,
         `${jobId}_product_frame.png`,
@@ -75,7 +108,9 @@ async function generateComfyUIVideo(params) {
     }
     
     // Node 611: Load Audio
-    if (videoWorkflow["611"]) videoWorkflow["611"].inputs.audio = comfyAudioName;
+    if (videoWorkflow["611"] && comfyAudioName) {
+      videoWorkflow["611"].inputs.audio = comfyAudioName;
+    }
     
     // Node 614: Prompt (Multimodal LTX prompt)
     if (videoWorkflow["614"]) {

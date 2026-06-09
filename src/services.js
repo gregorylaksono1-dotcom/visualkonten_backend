@@ -28,12 +28,11 @@ const s3Region = process.env.S3_RESOURCE_BUCKET_REGION || (bucketName === "visua
 const s3Client = new S3Client({ region: s3Region });
 
 const lambdaClient = new LambdaClient({ region });
-let secretsClient = null; // Lazy init
+const { getSecrets } = require("./lib/config");
 
 const PRICING_TABLE_NAME = process.env.PRICING_TABLE_NAME;
-const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
-const WORKER_B_QSTASH_URL = process.env.WORKER_B_QSTASH_URL;
 const COMFYUI_FUNCTION_NAME = process.env.COMFYUI_FUNCTION_NAME;
+const FREE_TRIAL_FUNCTION_NAME = process.env.FREE_TRIAL_FUNCTION_NAME;
 const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const MIDTRANS_API_URL = process.env.MIDTRANS_API_URL;
@@ -50,42 +49,35 @@ const getRedis = () => {
   return _redis;
 };
 
-const triggerWorkerBOnce = async () => {
-  if (!QSTASH_TOKEN || !WORKER_B_QSTASH_URL) return;
-  await fetch(`https://qstash-eu-central-1.upstash.io/v2/publish/${WORKER_B_QSTASH_URL}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${QSTASH_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ source: "worker_a" }),
-  });
-};
+const invokeFreeTrialWorker = async (jobId, jobDetail) => {
+  if (!FREE_TRIAL_FUNCTION_NAME) {
+    console.error("invokeFreeTrialWorker: FREE_TRIAL_FUNCTION_NAME tidak dikonfigurasi.");
+    return;
+  }
 
-const enqueueJob = async (jobId, jobDetail) => {
-  const redis = getRedis();
-  if (!redis) return;
+  const payload = {
+    jobId,
+    userEmail: jobDetail.userEmail || jobDetail.user_email,
+    userId: jobDetail.userId || jobDetail.user_id,
+    prompt: jobDetail.prompt,
+    videoQuality: jobDetail.videoQuality || jobDetail.video_quality,
+    aspectRatio: jobDetail.aspectRatio || jobDetail.aspect_ratio,
+    s3_keys: jobDetail.s3_keys || [],
+    ugc_mode: jobDetail.ugc_mode || null,
+    store_type: jobDetail.store_type || null,
+  };
+
   try {
-    const slimDetail = {
-      uuid: jobId,
-      user_email: jobDetail.user_email || jobDetail.userEmail,
-      user_id: jobDetail.user_id || jobDetail.userId,
-      status: "PENDING",
-      request_type: jobDetail.request_type || jobDetail.requestType,
-      prompt: jobDetail.prompt,
-      video_quality: jobDetail.video_quality || jobDetail.videoQuality,
-      aspect_ratio: jobDetail.aspect_ratio || jobDetail.aspectRatio,
-      resource_family: jobDetail.resource_family || jobDetail.resourceFamily || "video",
-      s3_keys: jobDetail.s3_keys || [],
-      s3ImageUrls: jobDetail.s3ImageUrls || [],
-      ugc_mode: jobDetail.ugc_mode || null,
-      store_type: jobDetail.store_type || null,
-    };
-    await redis.set(`job_detail:${jobId}`, JSON.stringify(slimDetail));
-    await redis.lpush("task_queue", jobId);
-    const flagSet = await redis.set("is_worker_active", "1", { ex: 60, nx: true });
-    if (flagSet === "OK" || flagSet === 1) {
-      await triggerWorkerBOnce();
-    }
+    await lambdaClient.send(
+      new InvokeCommand({
+        FunctionName: FREE_TRIAL_FUNCTION_NAME,
+        InvocationType: "Event",
+        Payload: JSON.stringify(payload),
+      })
+    );
   } catch (err) {
-    console.error("enqueueJob error:", err.message);
+    console.error("invokeFreeTrialWorker error:", err.message);
+    throw err;
   }
 };
 
@@ -96,8 +88,10 @@ const invokeComfyUI = async (jobId, jobDetail) => {
   if (!s3ImageUrls.length && jobDetail.s3_keys && jobDetail.s3_keys.length > 0) {
     s3ImageUrls = [];
     for (const key of jobDetail.s3_keys) {
-      const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
-      s3ImageUrls.push(await getSignedUrl(s3Client, cmd, { expiresIn: 3600 }));
+      if (key && typeof key === "string" && key.trim() !== "" && key !== "null" && key !== "undefined") {
+        const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
+        s3ImageUrls.push(await getSignedUrl(s3Client, cmd, { expiresIn: 3600 }));
+      }
     }
   }
 
@@ -271,26 +265,6 @@ const uploadToS3 = async (bucket, key, buffer, contentType) => {
   }));
 };
 
-const DEFAULT_SECRET_ARN = "arn:aws:secretsmanager:ap-southeast-1:084375570459:secret:VisualKonten-sLUo5Q";
-
-let _cachedSecrets = null;
-const getSecrets = async () => {
-  if (_cachedSecrets) return _cachedSecrets;
-  try {
-    const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
-    if (!secretsClient) secretsClient = new SecretsManagerClient({ region });
-    
-    const secretArn = process.env.MAIN_SECRET_ARN || DEFAULT_SECRET_ARN;
-    console.log(`[SecretsManager] Fetching consolidated secrets from: ${secretArn}`);
-    
-    const data = await secretsClient.send(new GetSecretValueCommand({ SecretId: secretArn }));
-    _cachedSecrets = JSON.parse(data.SecretString);
-    return _cachedSecrets;
-  } catch (err) {
-    console.error("Failed to fetch consolidated secrets:", err);
-    return {};
-  }
-};
 
 const getOpenAiKey = async () => {
   const secrets = await getSecrets();
@@ -324,10 +298,10 @@ const getComfyApiKeys = async () => {
 };
 
 const callOpenAILLM = async (systemPrompt, userPrompt) => {
-  console.log("Starting OpenAI gpt-4.1 call...");
+  console.log("Starting OpenAI gpt-5-mini call...");
   const apiKey = await getOpenAiKey();
   if (!apiKey) {
-    console.error("OpenAI API Key not found in Secrets Manager.");
+    console.error("OpenAI API Key not found in SSM Parameter Store.");
     throw new Error("OpenAI API Key not found.");
   }
 
@@ -339,15 +313,12 @@ const callOpenAILLM = async (systemPrompt, userPrompt) => {
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "gpt-4.1",
+        model: "gpt-5-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        temperature: 1.25,
-        top_p: 0.95,
-        frequency_penalty: 0.6,
-        presence_penalty: 0.8
+        temperature: 1
       })
     });
 
@@ -358,8 +329,9 @@ const callOpenAILLM = async (systemPrompt, userPrompt) => {
     }
 
     const json = await response.json();
-    console.log("OpenAI gpt-4.1 call successful.");
-    return json.choices[0].message.content.trim();
+    const content = json.choices[0].message.content.trim();
+    console.log("OpenAI call successful. Response content:", content);
+    return content;
   } catch (err) {
     console.error("OpenAI request failed:", err.message);
     throw err;
@@ -371,7 +343,7 @@ const callGeminiAudio = async (text, config) => {
   try {
     const apiKey = await getGeminiKey();
     if (!apiKey) {
-      throw new Error("Gemini API Key not found in Secrets Manager.");
+      throw new Error("Gemini API Key not found in SSM Parameter Store.");
     }
 
     const modelId = "gemini-3.1-flash-tts-preview";
@@ -466,6 +438,7 @@ const pickComfyApiKey = async (apiKeysString, redis) => {
 };
 
 const COMFY_BASE_URL = "https://cloud.comfy.org";
+// const COMFY_BASE_URL = "http://34.81.171.110:8188";
 
 const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputImage");
@@ -537,14 +510,14 @@ const submitWorkflow = async (workflow, apiKey) => {
 
 const resolveSignedUrl = async (fileInfo, apiKey) => {
   if (!fileInfo?.filename || !apiKey) return null;
-  const params = new URLSearchParams({ 
-    filename: fileInfo.filename, 
-    subfolder: fileInfo.subfolder || "", 
-    type: fileInfo.type || "output" 
+  const params = new URLSearchParams({
+    filename: fileInfo.filename,
+    subfolder: fileInfo.subfolder || "",
+    type: fileInfo.type || "output"
   });
-  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, { 
-    headers: { "X-API-Key": apiKey }, 
-    redirect: "manual" 
+  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, {
+    headers: { "X-API-Key": apiKey },
+    redirect: "manual"
   });
   return res.headers.get("location");
 };
@@ -571,7 +544,6 @@ module.exports = {
   docClient,
   s3Client,
   lambdaClient,
-  secretsClient,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -579,7 +551,7 @@ module.exports = {
   GetObjectCommand,
   PutObjectCommand,
   getSignedUrl,
-  enqueueJob,
+  invokeFreeTrialWorker,
   invokeComfyUI,
   resolvePricingRow,
   scanUserRequestsForUsage,

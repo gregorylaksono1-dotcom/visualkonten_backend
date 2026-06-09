@@ -14,6 +14,22 @@ function resolveImagePrompts(llmResponse, finalJobPrompt) {
       { key: "product_frame", prompt: product, suffix: "product" }
     ];
   }
+  const hero = ig.hero_frame?.prompt;
+  const transition = ig.transition_frame?.prompt;
+  const reveal = ig.reveal_start_frame?.prompt;
+  if (hero && transition && reveal) {
+    return [
+      { key: "hero_frame", prompt: hero, suffix: "hero" },
+      { key: "transition_frame", prompt: transition, suffix: "transition" },
+      { key: "reveal_start_frame", prompt: reveal, suffix: "reveal" }
+    ];
+  }
+  if (hero && reveal) {
+    return [
+      { key: "hero_frame", prompt: hero, suffix: "hero" },
+      { key: "reveal_start_frame", prompt: reveal, suffix: "reveal" }
+    ];
+  }
   const legacy = ig.prompt || finalJobPrompt;
   return [{ key: "prompt", prompt: legacy, suffix: "main" }];
 }
@@ -88,12 +104,17 @@ async function generateImageOpenAI(params) {
     }
 
     const promptJobs = resolveImagePrompts(llmResponse, finalJobPrompt);
+    const isThreeFrameProduct = promptJobs.length === 3 && promptJobs.some((j) => j.key === "transition_frame");
     const isTwoFrame = promptJobs.length === 2;
 
-    // Product frame first when 2-frame (anchor product identity), else single order
-    const orderedJobs = isTwoFrame
-      ? [...promptJobs].sort((a, b) => (a.key === "product_frame" ? -1 : b.key === "product_frame" ? 1 : 0))
-      : promptJobs;
+    const orderedJobs = isThreeFrameProduct
+      ? [...promptJobs].sort((a, b) => {
+          const order = { hero_frame: 0, transition_frame: 1, reveal_start_frame: 2, product_frame: 0, talent_frame: 1 };
+          return (order[a.key] ?? 9) - (order[b.key] ?? 9);
+        })
+      : isTwoFrame
+        ? [...promptJobs].sort((a, b) => (a.key === "product_frame" || a.key === "hero_frame" ? -1 : 1))
+        : promptJobs;
 
     const generated = {};
     let primaryS3Key = null;
@@ -123,9 +144,18 @@ async function generateImageOpenAI(params) {
       const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
       const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
 
-      if (job.key === "talent_frame" || job.key === "prompt") {
+      if (job.key === "talent_frame" || job.key === "prompt" || job.key === "reveal_start_frame") {
         primaryS3Key = s3Key;
         primarySignedUrl = signedUrl;
+      }
+      if (job.key === "hero_frame") {
+        generated.hero_frame_url = signedUrl;
+      }
+      if (job.key === "transition_frame") {
+        generated.transition_frame_url = signedUrl;
+      }
+      if (job.key === "reveal_start_frame") {
+        generated.reveal_start_frame_url = signedUrl;
       }
       if (job.key === "product_frame") {
         generated.product_frame_url = signedUrl;
@@ -141,10 +171,22 @@ async function generateImageOpenAI(params) {
     };
     let updateExpr = "SET generated_image = :genImg, updated_at = :now";
 
-    if (isTwoFrame) {
+    if (isThreeFrameProduct) {
+      updateExpr += ", generated_image_hero = :genHero, generated_image_transition = :genTrans, generated_image_reveal = :genReveal";
+      updateValues[":genHero"] = generated.hero_frame;
+      updateValues[":genTrans"] = generated.transition_frame;
+      updateValues[":genReveal"] = generated.reveal_start_frame;
+    } else if (isTwoFrame) {
       updateExpr += ", generated_image_product = :genProd, generated_image_talent = :genTalent";
-      updateValues[":genProd"] = generated.product_frame;
+      updateValues[":genProd"] = generated.product_frame || generated.hero_frame;
       updateValues[":genTalent"] = generated.talent_frame;
+    }
+
+    const newImageKeys = Object.values(generated).filter(Boolean);
+    if (newImageKeys.length > 0) {
+      updateExpr += ", s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys)";
+      updateValues[":empty_list"] = [];
+      updateValues[":newKeys"] = newImageKeys;
     }
 
     await dynamo.send(new UpdateCommand({
@@ -155,9 +197,10 @@ async function generateImageOpenAI(params) {
     }));
 
     const imageResultUrl = primarySignedUrl;
-    const productFrameUrl = generated.product_frame_url || null;
+    const productFrameUrl = generated.product_frame_url || generated.hero_frame_url || null;
+    const transitionFrameUrl = generated.transition_frame_url || null;
 
-    console.log(`[OpenAI ImageGen] Directing to ComfyUI Video Generation (twoFrame=${isTwoFrame})...`);
+    console.log(`[OpenAI ImageGen] Directing to ComfyUI Video Generation (twoFrame=${isTwoFrame}, threeFrameProduct=${isThreeFrameProduct})...`);
     await generateComfyUIVideo({
       uuid: jobId,
       user_email: userEmail,
@@ -170,6 +213,7 @@ async function generateImageOpenAI(params) {
       aspect_ratio: aspectRatio,
       imageResultUrl,
       productFrameUrl,
+      transitionFrameUrl,
       used_api_key: comfyApiKey,
       dynamo,
       s3,
@@ -184,5 +228,6 @@ async function generateImageOpenAI(params) {
 }
 
 module.exports = {
-  generateImageOpenAI
+  generateImageOpenAI,
+  callOpenAIImageEdit
 };

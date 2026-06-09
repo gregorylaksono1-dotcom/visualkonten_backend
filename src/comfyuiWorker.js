@@ -18,7 +18,7 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { getJakartaISOString } = require("./utils");
 const { buildWorkflow } = require("./workflows");
-const { 
+const {
   callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey,
   uploadInputImage, submitWorkflow, getOutputUrl, resolveSignedUrl,
   s3Client
@@ -27,9 +27,11 @@ const { generateComfyUIImage } = require("./core/imageGeneration");
 const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
 const { generateUgcLlmResponse } = require("./core/ugcLlm");
+const { generateMultiScenePipeline } = require("./core/multiSceneGeneration");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const COMFY_BASE_URL = "https://cloud.comfy.org";
+// const COMFY_BASE_URL = "http://34.81.171.110:8188";
+const COMFY_BASE_URL = "http://cloud.comfy.org";
 const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
 const STATUS_INDEX = process.env.STATUS_CREATED_INDEX_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -156,11 +158,30 @@ const handleSubmission = async (event) => {
         storeType,
         sellingMode,
         videoDuration,
+        lipSync: true,
         callLLM: callOpenAILLM,
       });
 
       if (llmResponse) {
         try {
+          if (llmResponse.voiceover_script && typeof llmResponse.voiceover_script === "object") {
+            if (!llmResponse.tts_script) {
+              llmResponse.tts_script = llmResponse.voiceover_script.tts_script || llmResponse.voiceover_script.script;
+            }
+            if (llmResponse.voiceover_script.word_count != null && llmResponse.tts_word_count == null) {
+              llmResponse.tts_word_count = llmResponse.voiceover_script.word_count;
+            }
+          }
+          if (llmResponse.voice_profile && typeof llmResponse.voice_profile === "object") {
+            if (!llmResponse.tts_global_config) {
+              llmResponse.tts_global_config = {
+                voice_name: llmResponse.voice_profile.voice_name || "Aoede",
+                speaking_rate: llmResponse.voice_profile.speaking_rate ?? 1.0,
+                pitch: llmResponse.voice_profile.pitch ?? 0.0,
+              };
+            }
+          }
+
           finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
 
           // Update DynamoDB with LLM response
@@ -174,12 +195,14 @@ const handleSubmission = async (event) => {
 
           // Trigger Gemini TTS
           let ttsResult = null;
-          if (llmResponse.tts_script && llmResponse.tts_global_config) {
+          const hasTtsScript = !!llmResponse.tts_script;
+          if (hasTtsScript) {
+            const ttsGlobalConfig = llmResponse.tts_global_config || { voice_name: "Aoede", speaking_rate: 1.0, pitch: 0.0 };
             ttsResult = await generateTTS({
               jobId,
               userEmail,
               userId: event.userId,
-              llmResponse,
+              llmResponse: { ...llmResponse, tts_global_config: ttsGlobalConfig },
               S3_RESOURCE_BUCKET,
               dynamo,
               USER_REQUEST_TABLE,
@@ -188,11 +211,48 @@ const handleSubmission = async (event) => {
             });
           }
 
+          if (!ttsResult || !ttsResult.audioS3Key) {
+            console.error(`[Worker] TTS Generation FAILED or script missing for job ${jobId}. Failing request.`);
+            await updateDynamoStatus(jobId, userEmail, "FAILED");
+            if (redis && comfyApiKey) {
+              try {
+                const redisKey = `comfyui_job_${comfyApiKey}`;
+                await redis.decr(redisKey);
+                console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (TTS generation failed)`);
+              } catch (rErr) {
+                console.error("[Redis] Error decrementing:", rErr.message);
+              }
+            }
+            return;
+          } else {
+            console.log(`[Worker] TTS Generation SUCCESS for job ${jobId}. Audio S3 Key: ${ttsResult.audioS3Key}`);
+          }
+
           // Flag to switch between OpenAI and Flux Image Generation
           const USE_OPENAI_IMAGE_GEN = true;
 
           if (currentS3ImageUrls.length > 0) {
-            if (USE_OPENAI_IMAGE_GEN) {
+            if (requestType === "UGC-P" && Array.isArray(llmResponse.scenes) && llmResponse.scenes.length > 0) {
+              // Trigger dynamic multi-scene video generation pipeline
+              await generateMultiScenePipeline({
+                jobId,
+                userEmail,
+                userId: event.userId,
+                currentS3ImageUrls,
+                llmResponse,
+                finalJobPrompt,
+                videoQuality,
+                aspectRatio,
+                S3_RESOURCE_BUCKET,
+                dynamo,
+                s3: s3Client,
+                USER_REQUEST_TABLE,
+                comfyApiKey,
+                audio: ttsResult?.audioS3Key || null,
+                audioDuration: ttsResult?.duration || null,
+                requestType
+              });
+            } else if (USE_OPENAI_IMAGE_GEN) {
               // Trigger OpenAI Image Generation + Video Generation Pipeline
               await generateImageOpenAI({
                 jobId,
@@ -234,14 +294,46 @@ const handleSubmission = async (event) => {
                 comfyApiKey // Reusing the same key picked above
               });
             }
+          } else {
+            console.error(`[Worker] No input images found for job ${jobId}. Failing request.`);
+            await updateDynamoStatus(jobId, userEmail, "FAILED");
+            if (redis && comfyApiKey) {
+              try {
+                const redisKey = `comfyui_job_${comfyApiKey}`;
+                await redis.decr(redisKey);
+                console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (No input images)`);
+              } catch (rErr) {
+                console.error("[Redis] Error decrementing:", rErr.message);
+              }
+            }
           }
 
         } catch (e) {
           console.error("[Worker] LLM JSON parse error:", e);
+          await updateDynamoStatus(jobId, userEmail, "FAILED");
+          if (redis && comfyApiKey) {
+            try {
+              const redisKey = `comfyui_job_${comfyApiKey}`;
+              await redis.decr(redisKey);
+              console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (LLM JSON parse error: ${e.message})`);
+            } catch (rErr) {
+              console.error("[Redis] Error decrementing:", rErr.message);
+            }
+          }
         }
       }
     } catch (err) {
       console.error("[Worker] AI processing error:", err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED");
+      if (redis && comfyApiKey) {
+        try {
+          const redisKey = `comfyui_job_${comfyApiKey}`;
+          await redis.decr(redisKey);
+          console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (AI processing error: ${err.message})`);
+        } catch (rErr) {
+          console.error("[Redis] Error decrementing:", rErr.message);
+        }
+      }
     }
   }
 

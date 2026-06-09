@@ -86,6 +86,7 @@ async function generateComfyUIImage(params) {
 
   } catch (imgErr) {
     console.error("[Worker] ComfyUI Image Gen error:", imgErr);
+    throw imgErr;
   }
 }
 

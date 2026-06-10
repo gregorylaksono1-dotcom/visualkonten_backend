@@ -62,8 +62,8 @@ const generateUgcLlmResponse = async ({
   }
 
   if (requestType === "UGC-P") {
-    console.log(`[UGC-LLM] UGC-P request: Reading and sending ugc2.md as prompt builder to OpenAI`);
-    const template = fs.readFileSync(path.join(PROMPT_DIR, "ugc2.md"), "utf-8");
+    console.log(`[UGC-LLM] UGC-P request: Reading and sending ugc_slim.md as prompt builder to OpenAI`);
+    const template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_slim.md"), "utf-8");
     const userPrompt = buildLegacyUserPrompt(requestType, description, opts);
     const aiResponse = await callLLM(template, userPrompt);
     return parseJsonFromLlm(aiResponse);

@@ -55,10 +55,22 @@ ideal well-proportioned physique, compelling confident pose, flattering silhouet
 Indonesian talent, Southeast Asian facial features, warm brown skin, natural Indonesian appearance
 ```
 
-**`{SPEAKS}`** — pola lip sync terkuat (scene 1 talking_head saja):
+**`{PHRASE_APPEAL}`** — talent **wajib menarik** (portrait / talking head — semua scene dengan wajah):
 ```text
-direct eye contact with the camera, eyes locked on lens and speaks "[lip_sync_segment verbatim]" with clear lip movement fully in sync with the spoken line
+naturally attractive, photogenic face, pleasant appealing features, charismatic everyday creator look
 ```
+**Wajib** di `talent_identity.prompt`, blok `SCENE` scene 1–2 (jika ada wajah), dan `ltx_prompt` talking head. **Bukan** studio glamour / model profesional — tetap UGC native + `{TAIL_PHONE}`.
+
+**`{NEG_UNATTRACTIVE}`** — anti talent membosankan (tambah `negative_prompt` scene 1–2):
+```text
+plain face, unattractive, awkward unflattering look, dull boring expression, unphotogenic, asymmetrical unflattering face, tired sickly look
+```
+
+**`{SPEAKS}`** — **satu-satunya** pola lip sync scene 1 (talking_head) — wajib **persis** ini:
+```text
+The talent looks directly into the camera and speaks "[lip_sync_segment verbatim]" with clear lip movement fully in sync with the spoken line
+```
+**Struktur `ltx_prompt` scene 1:** maks **1 kalimat** tone + framing → **langsung** `{SPEAKS}` → ekspresi/gerak **setelah** kutipan. **Dilarang** deskripsi panjang pose/ekspresi/produk **sebelum** `The talent looks directly into the camera and speaks`. **Dilarang** variasi lain (`The talent speaks`, `eyes locked on lens`, `direct eye contact` sebelum `speaks`).
 
 ---
 
@@ -306,7 +318,7 @@ small faceless child-sized mannequin wearing or displaying the exact children's 
 ## Framing per scene
 
 ### Talking head (scene 1 hook/context)
-`medium close-up, chest-up, subject centered, face clearly visible, direct eye contact with the camera, eyes locked on lens`. **Mata ke kamera wajib** (bukan ke samping/bawah). Segmen `hook` (dan `context` jika talking_head): kutip **verbatim**. Larangan: extreme close-up, wajah tertutup produk, paraphrase (`asking about`, `speaking about`), mata menghindar.
+`medium close-up, chest-up` (1 kalimat framing). Lalu **langsung** `{SPEAKS}` — wajib dimulai `The talent looks directly into the camera and speaks "…"`. Kutip **verbatim**. Larangan: paragraf panjang sebelum `speaks`, `direct eye contact` / `eyes locked on lens`, paraphrase (`asking about`, `speaking about`).
 
 ### Scene 2 reveal (wearable)
 `full body wearing pose, {PHRASE_BODY}, complete outfit visible, confident styling movement, not speaking to camera`. Shot full/three-quarter, garment terbaca kepala–kaki, posture tegak confident. Kamera **static** (biar tubuh bergerak). Larangan: extreme wide, bicara ke kamera, holding garment, slouchy/awkward, candid snapshot, runway/spin.
@@ -326,12 +338,12 @@ Target pasar Indonesia → talent **wajib** terlihat orang Indonesia.
 | Field | Aturan |
 |-------|--------|
 | `ethnicity` | Default `"Indonesian"` — eksplisit di setiap response |
-| `talent_identity.prompt` | Wajib `{PHRASE_ID}` + `warm brown skin typical of Indonesian people`, `real smartphone UGC`, `natural skin texture` — bukan glamour/model pro. Wearable: tambah `{PHRASE_BODY}` |
+| `talent_identity.prompt` | Wajib `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** + `warm brown skin typical of Indonesian people`, `real smartphone UGC`, `natural skin texture` — talent **harus menarik** tapi **bukan** studio glamour/model pro. Wearable scene 2: tambah `{PHRASE_BODY}` |
 | `image_negative_avoid` | Wajib = `{NEG_STUDIO}` (dipakai backend saat generate portrait talent step 1) |
 | `outfit_lock` | Wearable: deskripsi **garment produk**. Kids: pakaian dewasa netral scene 1 |
 | `product_identity.prompt` | Warna, bahan, potongan, pattern |
 
-**Contoh `talent_identity.prompt` (wanita, hijab):** *Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, soft dark brown hair under a simple neutral hijab, plain cream ribbed top, friendly everyday UGC creator, chest-up portrait, soft natural window daylight, real smartphone UGC photo, natural skin texture, authentic not glamour.*
+**Contoh `talent_identity.prompt` (wanita, hijab):** *Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look, soft dark brown hair under a simple neutral hijab, plain cream ribbed top, chest-up portrait, soft natural window daylight, real smartphone UGC photo, natural skin texture, authentic not glamour.*
 
 Backend step 1: portrait talent digenerate dari `talent_identity.prompt`; jika tidak menyebut etnis Indonesia, model drift ke wajah non-Indonesia.
 
@@ -352,7 +364,7 @@ Backend step 1: portrait talent digenerate dari `talent_identity.prompt`; jika t
 
 Bahasa **Inggris**. Struktur wajib dua bagian: `REFERENCE IMAGES` → `SCENE`. **Jangan** sebut `9:16`/`vertical`/`1024x1536`/resolusi.
 
-Setiap `SCENE` wajib mengarah ke foto hasil kamera HP. Wajib sertakan frasa positif `{TAIL_PHONE}` di blok `SCENE`. Scene 2 reveal wearable: tambah `{PHRASE_BODY}`. **Dilarang:** `candid`, `casual snapshot`, `relaxed slouchy try-on` (terutama full body). `negative_prompt` semua scene wajib memuat `{NEG_STUDIO}`; scene 1–2 tambah `{NEG_ETHNIC}`.
+Setiap `SCENE` wajib mengarah ke foto hasil kamera HP. Wajib sertakan **`{PHRASE_APPEAL}`** (jika ada wajah/talent) + `{TAIL_PHONE}` di blok `SCENE`. Scene 2 reveal wearable: tambah `{PHRASE_BODY}`. **Dilarang:** `candid`, `casual snapshot`, `relaxed slouchy try-on` (terutama full body). `negative_prompt` semua scene wajib memuat `{NEG_STUDIO}`; scene 1–2 tambah `{NEG_ETHNIC}` + `{NEG_UNATTRACTIVE}`.
 
 **`REFERENCE IMAGES` — talent + produk (`product_image_count: 1`):**
 ```text
@@ -372,10 +384,10 @@ REFERENCE IMAGES: The first attached image is the product reference — keep the
 
 **`SCENE` template umum:**
 ```text
-SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. [framing + pose + produk/talent per scene]. Indonesian talent with natural Southeast Asian features, warm brown skin. {TAIL_PHONE} No on-screen text, signage, UI, watermark, or split layout.
+SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. [framing + pose + produk/talent per scene]. Indonesian talent with natural Southeast Asian features, warm brown skin. {PHRASE_APPEAL} {TAIL_PHONE} No on-screen text, signage, UI, watermark, or split layout.
 ```
 
-**Scene 1 talking head — anti-AI-perfect (target realistis):** outfit **netral harian** (bukan produk), ekspresi **mid-speech** (mulut sedikit terbuka, alis skeptis playful), kulit **natural texture**, background **lived-in** (rak kayu/tanaman, shallow DOF), **window daylight** + warm fill. `negative_prompt` scene 1 tambah: `fashion catalog, symmetrical influencer pose, big staged smile, waving at camera, empty gray wall, sterile minimalist room, glossy fabric, overly saturated, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, side glance, off-camera gaze`.
+**Scene 1 talking head — anti-AI-perfect (target realistis):** talent **wajib menarik** (`{PHRASE_APPEAL}`) — bukan plain/average. Outfit **netral harian** (bukan produk), ekspresi **mid-speech** (mulut sedikit terbuka, alis skeptis playful), kulit **natural texture**, background **lived-in** (rak kayu/tanaman, shallow DOF), **window daylight** + warm fill. `ltx_prompt` scene 1 wajib sertakan `{PHRASE_APPEAL}`. `negative_prompt` scene 1 tambah: `{NEG_UNATTRACTIVE}`, `fashion catalog, symmetrical influencer pose, big staged smile, waving at camera, empty gray wall, sterile minimalist room, glossy fabric, overly saturated, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, side glance, off-camera gaze`.
 
 **`SCENE` scene 3 (object):**
 ```text
@@ -402,6 +414,11 @@ Generate caption TikTok, Shopee, Instagram. Conversion-focused, standalone persu
 
 - Bahasa **Inggris**, **4–6 kalimat**, tone di depan, **satu arc aksi** + static / very slow push-in
 - I2V: deskripsikan **perubahan temporal**, bukan ulang statis; jangan timestamp
+- **Tone ↔ first frame konsisten:** tone di `ltx_prompt` **wajib** selaras dengan mood `image_prompt`/first frame. Jika first frame `warm golden / soft daylight`, jangan tulis `cold blue night` — transisi besar memicu warping/drift.
+- **`{NEG_BASE}` (artefak dasar — sertakan di setiap `ltx_negative_prompt`):**
+  ```text
+  morphing, distortion, warping, flicker, jitter, blur, artifacts, glitch, overexposure, watermark, text, subtitles, deformed, extra limbs
+  ```
 
 ### Pemisahan positif vs negatif (wajib)
 
@@ -416,12 +433,14 @@ Generate caption TikTok, Shopee, Instagram. Conversion-focused, standalone persu
 
 ### Aturan lip sync / `talking_head` (gabungan — wajib)
 
-LTX memicu gerak bibir hanya jika **bicara = aksi langsung + kutipan**, bukan deskripsi nada. Pola wajib = `{SPEAKS}` (atau minimal `The talent speaks "[quote]" with clear lip movement fully in sync with the spoken line`).
+LTX memicu gerak bibir hanya jika **bicara = aksi langsung + kutipan**. Pola **wajib** scene 1 = `{SPEAKS}` — **hanya** kalimat yang dimulai `The talent looks directly into the camera and speaks`.
 
 | Pola | Status |
 |------|--------|
-| `...eyes locked on lens and speaks "[quote]"` | ✅ Terkuat |
-| `The talent speaks "[quote]"` / `speaks "[quote]"` langsung | ✅ Kuat / wajib |
+| `The talent looks directly into the camera and speaks "[quote]"` | ✅ **Wajib** — satu-satunya pola scene 1 |
+| `The talent speaks "[quote]"` tanpa `looks directly into the camera` | ❌ Ganti ke pola wajib |
+| Deskripsi pose/produk/ekspresi **sebelum** `The talent looks…` | ❌ Pindah **setelah** kutipan |
+| `direct eye contact`, `eyes locked on lens` sebelum `speaks` | ❌ Mematikan lip sync |
 | `with clear lip movement fully in sync with the spoken line` | ✅ Wajib (pada kalimat kutip) |
 | `starts with a (playful/amused) smile and speaks`, `begins with a smile` **sebelum** `speaks` | ❌ Mematikan lip sync — dilarang |
 | `speaks in a … tone/manner`, `while speaking`, `conversational tone` | ❌ Khiasan — dilarang |
@@ -440,6 +459,8 @@ Aturan tambahan: kutip `lip_sync_segment` **verbatim** dalam `"..."` langsung se
 
 ### `ltx_negative_prompt` — contoh isi
 
+> Setiap scene = `{NEG_BASE}` + tambahan spesifik di bawah.
+
 - **Scene 1 (talking head):** `no lip movement, no lip sync, no speaking to camera, listening to voiceover, no speech, subtle natural lip movement, looking away from camera, eyes averted, looking down, off-camera gaze, on-screen text, logos, UI, watermark, morphing, flicker, extreme close-up, product covering mouth`
 - **Scene 2 (no lip sync — wajib):** `speech, lip sync, dialogue in quotes, speaking to camera, mouth movement, holding clothes, runway pose, dramatic spin, frozen mannequin pose, slouchy posture, only camera movement, on-screen text, UI, morphing, flicker, cartoon, illustration`
 - **Scene 3 (anti-drift/kartun):** `person, hands, face, woman, man, human, folded garment, flat lay pile, speech, cartoon, illustration, sketch, anime, comic, cel-shaded, storyboard, furniture, on-screen text, logos, UI, studio catalog look, morphing, flicker, style change, scene cut`
@@ -450,7 +471,7 @@ Aturan tambahan: kutip `lip_sync_segment` **verbatim** dalam `"..."` langsung se
 
 **Scene 1 (hook_context, 7s):**
 ```text
-Realistic documentary-style footage, soft natural daylight. Medium close-up chest-up, subject centered, static handheld framing. The talent looks directly into the camera with direct eye contact, eyes locked on lens and speaks "Kalau tunik, aku pilih Fahira," with clear lip movement fully in sync with the spoken line. The expression shifts to skeptical curiosity with a slight head tilt and one small natural hand gesture while maintaining eye contact with the camera. Faint room ambience. Photorealistic.
+Realistic documentary-style footage, soft natural daylight. Medium close-up chest-up. The talent looks directly into the camera and speaks "Kalau tunik, aku pilih Fahira," with clear lip movement fully in sync with the spoken line. The expression shifts to skeptical curiosity with a slight head tilt and one small natural hand gesture. Faint room ambience. Photorealistic.
 ```
 
 **Scene 2 (reveal_demo, wearable, 7s):**
@@ -677,14 +698,15 @@ assert voiceover_script.tts_script.startsWith("[fast] ")
 - [ ] Output = pure JSON; `meta.spec_variant` = `ugc2_product_hero_close`; **3 scenes**, sum duration = 20 (7+7+6)
 - [ ] `audio_start`: scene 1 = 0, scene 2 = 7.0, scene 3 = 14.0; `audio_segments` sum `duration_s` = `duration_seconds`, `vo_offset` ascending
 - [ ] Scene 1: `talkvid: true`, hook = `talking_head`, context = `voiceover_only`; mata ke kamera; **satu** kutipan saja
-- [ ] Scene 1 `ltx_prompt` pola `{SPEAKS}` — **tanpa** `starts with a smile` sebelum `speaks`; `clear lip movement fully in sync` (bukan `subtle natural lip movement`)
+- [ ] Scene 1 `ltx_prompt`: **langsung** `The talent looks directly into the camera and speaks "[quote]"` — maks 1 kalimat framing sebelumnya; **tanpa** basa-basi / `starts with a smile` sebelum `speaks`
 - [ ] Scene 2–3: `talkvid: false`; reveal = `voiceover_only`; `ltx_prompt` tanpa kutip/dialog
 - [ ] Scene 2 reveal wearable: full body, `{PHRASE_BODY}`, `lip_sync_segment: ""`
 - [ ] Scene 3: `use_model_reference: false`, produk saja, semi close-up, no person/hands; wearable = hanger/mannequin full display (bukan folded)
 - [ ] `product_display_mode` terisi; pakaian anak = `wearable_kids` + `product_audience: children`, mannequin anak tanpa wajah, dewasa **tidak** memakai produk anak
 - [ ] `ltx_prompt` positif saja (tanpa `no/not`, `TikTok`/`UGC`); larangan di `ltx_negative_prompt`; `ltx_negative_prompt` terisi per scene
 - [ ] `negative_prompt` semua scene memuat `{NEG_STUDIO}`; scene 1–2 tambah `{NEG_ETHNIC}`; `talent_identity.image_negative_avoid` = `{NEG_STUDIO}`
-- [ ] `talent_identity.prompt` menyebut `{PHRASE_ID}`; talent terlihat orang Indonesia
+- [ ] `talent_identity.prompt` menyebut `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** — talent **menarik** tapi bukan studio glamour; terlihat orang Indonesia
+- [ ] Scene 1–2 `image_prompt` / `negative_prompt`: `{PHRASE_APPEAL}` di SCENE; `{NEG_UNATTRACTIVE}` di negative
 - [ ] `image_prompt` tanpa aspect ratio/resolusi; blok `SCENE` memuat `{TAIL_PHONE}`; tanpa `candid`/`casual snapshot`
 - [ ] `voiceover_script` dibuka punch line lucu bodoh (5–8 kata); `skeptic_bridge_opener` terisi, **bukan** default `Jujur`
 - [ ] `voice_name` ∈ `allowed_voices[gender]`, sesuai tone (bukan default Puck/Aoede); `gender` = `talent_identity.gender`

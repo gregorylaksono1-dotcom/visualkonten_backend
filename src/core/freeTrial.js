@@ -172,11 +172,7 @@ async function processFreeTrialJob(params) {
     const { buildTtsGlobalConfig, syncGenderFields } = require("../lib/resolve-voice");
 
     const redis = getRedis();
-    const apiKeysString = await getComfyApiKeys();
-    const comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
-    if (!comfyApiKey) {
-      throw new Error("[FreeTrial] All ComfyUI API keys are busy. Skipping for now.");
-    }
+    const comfyApiKey = undefined;
 
     let videoPromptId;
     try {

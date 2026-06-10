@@ -21,7 +21,7 @@ const { buildWorkflow } = require("./workflows");
 const {
   callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey,
   uploadInputImage, submitWorkflow, getOutputUrl, resolveSignedUrl,
-  s3Client
+  s3Client, PutObjectCommand
 } = require("./services");
 const { generateComfyUIImage } = require("./core/imageGeneration");
 const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
@@ -77,6 +77,39 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
   }
 };
 
+const saveWorkflowAndFailConcurrency = async (jobId, userEmail, workflow, errorMsg) => {
+  console.log(`[Worker] Concurrency limit exceeded for job ${jobId}. Handling FAILED_CONCCURENCY.`);
+  if (workflow) {
+    try {
+      await s3Client.send(new PutObjectCommand({
+        Bucket: S3_RESOURCE_BUCKET,
+        Key: `workflow/${jobId}.json`,
+        Body: JSON.stringify(workflow),
+        ContentType: "application/json"
+      }));
+      console.log(`[Worker] Saved failed workflow to S3: workflow/${jobId}.json`);
+    } catch (s3Err) {
+      console.error(`[Worker] Failed to save workflow to S3:`, s3Err.message);
+    }
+  }
+  try {
+    await dynamo.send(new UpdateCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      UpdateExpression: "SET #s = :s, error_message = :e, updated_at = :u",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":s": "FAILED_CONCCURENCY",
+        ":e": errorMsg || "Concurrency limit exceeded",
+        ":u": getJakartaISOString(),
+      },
+    }));
+    console.log(`[Worker] Updated DynamoDB status to FAILED_CONCCURENCY for job ${jobId}`);
+  } catch (dbErr) {
+    console.error(`[Worker] Failed to update DynamoDB status to FAILED_CONCCURENCY:`, dbErr.message);
+  }
+};
+
 const getProcessingJobs = async () => {
   const res = await dynamo.send(new QueryCommand({
     TableName: USER_REQUEST_TABLE,
@@ -110,6 +143,17 @@ const checkSingleJobStatus = async (job, redis) => {
       } else {
         await updateDynamoStatus(job.uuid, job.user_email, "FAILED");
       }
+
+      // Release the Redis API key counter
+      if (redis) {
+        try {
+          const redisKey = `comfyui_job_${apiKey}`;
+          await redis.decr(redisKey);
+          console.log(`[Poller] [Redis] Decremented ${redisKey} for job ${job.uuid} (${status})`);
+        } catch (rErr) {
+          console.error("[Poller] [Redis] Error decrementing:", rErr.message);
+        }
+      }
     }
   } catch (err) {
     console.error(`[Poller] Error job ${job.uuid}:`, err.message);
@@ -133,16 +177,9 @@ const handleSubmission = async (event) => {
   // 1. Dev Dummy Check (Skip ComfyUI Cloud in Dev for Video Gen)
   const isDev = process.env.USER_REQUEST_TABLE_NAME && process.env.USER_REQUEST_TABLE_NAME.endsWith("-dev");
 
-  // 2. Pick ComfyUI API Key early to be used for both Image Gen and Video Gen
+  // 2. Define redis and comfyApiKey (will be picked later in generators)
   const redis = getRedis();
-  const services = require("./services");
-  const apiKeysString = await services.getComfyApiKeys();
-  const comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
-
-  if (!comfyApiKey) {
-    console.log(`[Worker] All ComfyUI API keys are busy. Skipping job ${jobId} for now.`);
-    return;
-  }
+  const comfyApiKey = undefined;
 
   // 3. Process Heavy AI Requirements (LLM & Gemini)
   if (requestType === "UGC-P" || requestType === "UGC-S") {
@@ -315,13 +352,17 @@ const handleSubmission = async (event) => {
           }
 
         } catch (e) {
-          console.error("[Worker] LLM JSON parse error:", e);
-          await updateDynamoStatus(jobId, userEmail, "FAILED");
+          if (e.statusCode === 420) {
+            await saveWorkflowAndFailConcurrency(jobId, userEmail, e.workflow, e.message);
+          } else {
+            console.error("[Worker] LLM JSON parse error:", e);
+            await updateDynamoStatus(jobId, userEmail, "FAILED");
+          }
           if (redis && comfyApiKey) {
             try {
               const redisKey = `comfyui_job_${comfyApiKey}`;
               await redis.decr(redisKey);
-              console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (LLM JSON parse error: ${e.message})`);
+              console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (Error handled: ${e.message})`);
             } catch (rErr) {
               console.error("[Redis] Error decrementing:", rErr.message);
             }
@@ -329,13 +370,17 @@ const handleSubmission = async (event) => {
         }
       }
     } catch (err) {
-      console.error("[Worker] AI processing error:", err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED");
+      if (err.statusCode === 420) {
+        await saveWorkflowAndFailConcurrency(jobId, userEmail, err.workflow, err.message);
+      } else {
+        console.error("[Worker] AI processing error:", err);
+        await updateDynamoStatus(jobId, userEmail, "FAILED");
+      }
       if (redis && comfyApiKey) {
         try {
           const redisKey = `comfyui_job_${comfyApiKey}`;
           await redis.decr(redisKey);
-          console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (AI processing error: ${err.message})`);
+          console.log(`[Redis] Decremented ${redisKey} for job ${jobId} (Error handled: ${err.message})`);
         } catch (rErr) {
           console.error("[Redis] Error decrementing:", rErr.message);
         }

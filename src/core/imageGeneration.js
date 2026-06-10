@@ -86,6 +86,15 @@ async function generateComfyUIImage(params) {
 
   } catch (imgErr) {
     console.error("[Worker] ComfyUI Image Gen error:", imgErr);
+    if (comfyApiKey && redis) {
+      try {
+        const redisKey = `comfyui_job_${comfyApiKey}`;
+        await redis.decr(redisKey);
+        console.log(`[Worker] [Redis] Decremented ${redisKey} due to ComfyUI Image Gen failure`);
+      } catch (rErr) {
+        console.error("[Worker] [Redis] Error decrementing ComfyUI Image Gen key:", rErr.message);
+      }
+    }
     throw imgErr;
   }
 }

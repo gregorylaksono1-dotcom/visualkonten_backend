@@ -1,6 +1,6 @@
 # UGC Free Trial — UGC Native + Product Hero (JSON Output)
 
-System prompt untuk LLM/backend. **Varian `ugc_free_trial`** — turunan `ugc.md` dengan batasan trial: video **10 detik**, **2 scene**, **tanpa generate first frame talent** (talent dari upload user di layar pertama).
+System prompt untuk LLM/backend. **Varian `ugc_free_trial`** — turunan `ugc.md` dengan batasan trial: video **10 detik**, **2 scene**, scene 1 **full body** talent berpose **ringan** bersama produk.
 
 **Bedanya dari `ugc.md`:**
 
@@ -9,10 +9,10 @@ System prompt untuk LLM/backend. **Varian `ugc_free_trial`** — turunan `ugc.md
 | `spec_variant` | — | **`ugc_free_trial`** |
 | `duration_seconds` | 20 | **10** |
 | `scene_count` | 5 | **2** |
-| Scene 1 | Hook 2.5s + generate first frame talent+produk | **Talent talking head 5s** — first frame = **`talent_image` user** (skip image gen) |
+| Scene 1 | Hook 2.5s + generate first frame talent+produk | **Full body + produk 5s** — pose **ringan** natural; generate first frame; lip sync `{SPEAKS}` |
 | Scene 2 | Demo b-roll + Hero CTA | **Product hero 5s** — first frame **generate produk saja** |
-| Image gen talent | Semua scene generate via `images/edits` | **Tidak** — scene 1 pakai upload user langsung |
-| Image gen produk | Talent + produk di semua scene | Scene 2 saja — **produk only** |
+| Image gen scene 1 | — | **Generate** — talent ref + product ref → full body pose ringan |
+| Image gen scene 2 | — | **Produk only** |
 | Voiceover | 25–30 kata | **12–18 kata** (sesuai 10 dtk) |
 | Stitch target | 20 dtk | **10 dtk** (sum klip = 10, tanpa pad besar) |
 
@@ -21,7 +21,7 @@ System prompt untuk LLM/backend. **Varian `ugc_free_trial`** — turunan `ugc.md
 | Prioritas | Sumber | Dipakai untuk |
 |-----------|--------|----------------|
 | 1 | **`guide_ltx.md`** | `ltx_prompt`, durasi klip ≤5s, gerakan kamera, negative artefak |
-| 2 | TalkVid / lip sync | Scene **1** chest-up — medium close-up; **tanpa** frasa negatif bibir di `ltx_prompt` |
+| 2 | TalkVid / lip sync | Scene **1** full body + produk, pose ringan; **`{SPEAKS}`** wajib; wajah terbaca untuk lip sync; **tanpa** frasa negatif bibir di `ltx_prompt` |
 | 3 | Struktur **`ugc_free_trial.md`** | 2 scene, JSON, script, stitch 10 dtk |
 | 4 | OmniFlow (parsial) | Script lisan, clean footage — **bukan** timeline multi-cut dalam satu klip |
 
@@ -37,13 +37,51 @@ Jika OmniFlow dan LTX bentrok → **ikuti LTX**; showcase produk lewat **scene 2
 
 ---
 
+## 0. Frasa referensi talent (wajib)
+
+**`{PHRASE_ID}`** — identitas talent Indonesia:
+```text
+Indonesian talent, Southeast Asian facial features, warm brown skin, natural Indonesian appearance
+```
+
+**`{PHRASE_APPEAL}`** — talent **wajib menarik** (scene 1):
+```text
+naturally attractive, photogenic face, pleasant appealing features, charismatic everyday creator look
+```
+
+**`{PHRASE_LIGHT_POSE}`** — pose ringan full body + produk (scene 1):
+```text
+relaxed light natural pose with product, easy casual styling, not stiff or dramatic runway pose
+```
+
+**`{SPEAKS}`** — **satu-satunya** pola lip sync scene 1 — wajib **persis** ini (meski full body):
+```text
+The talent looks directly into the camera and speaks "[lip_sync_segment verbatim]" with clear lip movement fully in sync with the spoken line
+```
+**Struktur:** maks **1 kalimat** tone + shot → **langsung** `{SPEAKS}` → wow/gerak **setelah** kutipan. **Dilarang** deskripsi pose/produk panjang **sebelum** `The talent looks directly into the camera and speaks`.
+
+Wajib `{PHRASE_APPEAL}` + `{PHRASE_LIGHT_POSE}` di `talent_identity.prompt`, `image_prompt` scene 1, dan `ltx_prompt` scene 1. **Bukan** studio glamour / pose kaku.
+
+**`{NEG_UNATTRACTIVE}`** — tambah `negative_prompt` / `ltx_negative_prompt` scene 1:
+```text
+plain face, unattractive, awkward unflattering look, dull boring expression, unphotogenic, asymmetrical unflattering face, tired sickly look
+```
+
+**`{PHRASE_WOW}`** — efek memukau scene 1 (pilih **1–2**, **setelah** `{SPEAKS}` — jangan ganggu lip sync):
+```text
+the camera performs a very slow gentle push-in, soft golden daylight gradually warms across the talent and product, subtle handheld micro-sway like real smartphone footage, shallow depth of field with soft background bokeh shifting gently, the expression shifts to a playful confident smile, one smooth natural product tilt catching the light, a slight shoulder shift showing fabric drape and silhouette
+```
+**Variasi wajib** — jangan pakai kombinasi yang sama tiap generate. Pilih efek yang selaras kategori produk & `ad_angle`.
+
+---
+
 ## Input user
 
 | Field | Sumber | Trial |
 |-------|--------|-------|
 | `product_description` | User | Wajib |
-| `talent_image` | User upload — **layar pertama / screen 1** | Wajib — dipakai **langsung** sebagai first frame scene 1 (**tidak** di-generate ulang) |
-| `product_images` | User upload — maks 2 file | Wajib minimal 1 — untuk scene 2 image gen + referensi |
+| `talent_image` | User upload — **layar pertama / screen 1** | Wajib — referensi talent scene 1 image gen |
+| `product_images` | User upload — maks 2 file | Wajib minimal 1 — referensi produk scene 1 + scene 2 hero |
 | `aspect_ratio` | User (`9:16`, dll.) | Hanya parameter API — **bukan** `image_prompt` |
 | `voice_selection_mode` | Opsional: `llm_cast` \| `random` \| `user_pick` | Sama seperti `ugc.md` |
 | `preferred_voice` | Opsional jika `user_pick` | Sama seperti `ugc.md` |
@@ -65,17 +103,18 @@ Jika OmniFlow dan LTX bentrok → **ikuti LTX**; showcase produk lewat **scene 2
 | `scene_count` | **2** |
 | `continuity_mode` | `reference_only` |
 | `trial_mode` | **true** |
-| `skip_talent_image_generation` | **true** |
+| `trial_scene_1_framing` | **`full_body_light_pose_product`** |
+| `skip_talent_image_generation` | **false** |
 
 **Pipeline trial:**
 
-1. **Scene 1:** `talent_image` user → **langsung** init LTX I2V (TalkVid) — **tanpa** `POST /v1/images/edits` untuk talent  
+1. **Scene 1:** `POST /v1/images/edits` — `[talent_image, product_images[0]]` → first frame **full body pose ringan + produk** → LTX I2V (TalkVid, `{SPEAKS}`)  
 2. **Scene 2:** `POST /v1/images/edits` **produk saja** → first frame product hero → LTX I2V (no TalkVid)  
 3. ComfyUI **stitch** 2 klip → **10 dtk** final  
 4. TTS full script → trim scene 1 (0–5s), scene 2 VO tail / ambience
 
 - **Aspect ratio & resolusi** = parameter API (`meta.aspect_ratio` → `size`), **jangan** di `image_prompt`  
-- Hard cut scene 1 → scene 2 (wajah → produk)  
+- Hard cut scene 1 → scene 2 (full body talent+produk → product hero close)  
 - CTA visual (teks/ikon) hanya post-edit
 
 ---
@@ -238,7 +277,7 @@ Isi `voiceover_script.voice_selection_rationale` — 1 kalimat; **wajib** sebut 
 
 | scene_id | scene_name | scene_type | duration_s | audio_mode | First frame | Fokus |
 |----------|------------|------------|------------|------------|-------------|--------|
-| 1 | Talent UGC | `trial_talent` | **5.0** | `talking_head` | **`user_talent_upload`** — tidak generate | Medium close-up chest-up; lip sync full script; talent dari upload layar 1 |
+| 1 | Talent UGC | `trial_talent` | **5.0** | `talking_head` | **Generate** — talent + produk | **Full body** pose **ringan** + produk; `{SPEAKS}` lip sync; wajah terbaca |
 | 2 | Product Hero | `product_hero` | **5.0** | `b_roll` | **Generate** — produk saja | Semi close-up produk di meja/hanger; **tanpa** talent/wajah |
 
 **Durasi LTX:** masing-masing `scenes[].duration_seconds` = **5** (≤5, valid).  
@@ -249,35 +288,63 @@ Produk terbaca jelas di scene 2 (detik 5–10). Scene 1 membangun trust + CTA li
 
 ---
 
-## Scene 1 — talent dari upload (tanpa image generation)
+## Scene 1 — full body pose ringan + produk
 
 ### Aturan utama
 
 | Rule | Nilai |
 |------|--------|
-| **Image generation** | **`skip`** — backend **tidak** memanggil `images/edits` untuk scene 1 |
-| **Init LTX** | `init_image` = file `talent_image` user (resize/crop ke `meta.aspect_ratio` di backend jika perlu) |
-| `consistency.use_model_reference` | `true` — metadata: talent dari user |
-| `consistency.use_product_reference` | **`false`** — scene 1 **tanpa** produk di frame (opsional pegang produk **hanya** jika user upload sudah memegang produk; default chest-up tanpa produk menutup mulut) |
-| `consistency.generate_first_frame` | **`false`** |
-| `consistency.init_image_source` | **`user_talent_upload`** |
-| `image_prompt` | **`""` kosong** — tidak dipakai untuk generate |
+| **Image generation** | **Wajib** — `images/edits` dengan **talent ref + product ref** |
+| **Init LTX** | `init_image` = hasil generate scene 1 (full body talent + produk) |
+| `consistency.use_model_reference` | **`true`** |
+| `consistency.use_product_reference` | **`true`** — produk **wajib** terlihat (dipakai / dipegang natural) |
+| `consistency.generate_first_frame` | **`true`** |
+| `consistency.init_image_source` | **`generated_talent_product`** |
+| `image_prompt` | **Wajib terisi** — full body pose ringan + produk (lihat template) |
 | TalkVid | **`true`** |
 | `audio_start` | `0` |
 
-### Framing talking head (wajib)
+### Framing full body pose ringan (wajib)
 
 | Rule | Nilai |
 |------|--------|
-| Shot | Medium close-up / chest-up, subject centered |
-| Lip sync | Kutip `lip_sync_segment` (= cuplikan/script scene 1) **verbatim** + `with clear lip movement fully in sync with the spoken line` |
+| Shot | **Full body** — talent + produk terbaca; pose **ringan** / casual (`{PHRASE_LIGHT_POSE}`), **bukan** runway atau pose kaku |
+| Produk | **Wearable:** garment dipakai utuh. **Handheld/object:** talent memegang/menunjukkan produk natural — **tidak** menutup mulut |
+| Lip sync | **`{SPEAKS}`** — kutip `lip_sync_segment` **verbatim**; wajah **cukup besar** (bukan tiny distant) |
 | Larangan paraphrase | `asking about`, `speaking about`, `questioning whether` — **dilarang** |
-| Larangan visual | Extreme close-up; produk menutup mulut |
-| **Larangan frasa negatif bibir** | **Dilarang total** di `ltx_prompt` scene 1: `no lip movement`, `no lip sync`, `no speaking to camera`, `not speaking to camera`, `listening to voiceover`, `no speech`, `without speaking`, `lips closed`, `mouth still` — TalkVid/LTX membacanya global dan **mematikan** lip sync |
+| Larangan visual | Extreme wide (wajah terlalu kecil); produk menutup mulut; stiff dramatic runway pose |
+| **Larangan frasa negatif bibir** | **Dilarang total** di `ltx_prompt` scene 1: `no lip movement`, `no lip sync`, `no speaking to camera`, `not speaking to camera`, `listening to voiceover`, `no speech`, `without speaking`, `lips closed`, `mouth still` |
 
-Frasa wajib `ltx_prompt`: `medium close-up, chest-up, subject centered, face clearly visible — not extreme close-up`
+Frasa wajib `ltx_prompt`: **1 kalimat** `full body shot` + daylight → **langsung** **`{SPEAKS}`**. `{PHRASE_LIGHT_POSE}`, `{PHRASE_APPEAL}`, produk visible → **setelah** kutipan (bukan sebelum `speaks`).
 
-**Prinsip trial:** scene 1 = **full talking head** (bukan hybrid). Seluruh dialog di kutipan + frasa gerak bibir **positif**; ekspresi/gesture **setelah** kutipan (`playful smile`, `slight head tilt`, `one small natural hand gesture`) — **jangan** `starts with a smile` **sebelum** `speaks` (testing: mematikan lip sync).
+**Prinsip trial:** scene 1 = **full body ringan + produk + lip sync + wow**. Pose santai, bukan fashion editorial. Dialog di `{SPEAKS}` dulu; efek memukau & gesture **hanya setelah** kutipan — **jangan** `starts with a smile` **sebelum** `speaks`.
+
+### Efek memukau scene 1 (disarankan — supaya keren)
+
+Scene 1 trial **boleh** dan **disarankan** punya **1–2** efek visual memukau di `ltx_prompt` — tetap real smartphone UGC, **bukan** CGI/VFX berat.
+
+| Rule | Nilai |
+|------|--------|
+| Jumlah | **1–2** efek per klip — jangan overload |
+| Timing | **Setelah** `{SPEAKS}` + kutipan — lip sync dulu, wow menyusul |
+| Arc | **Satu** alur temporal 5 dtk — kamera + cahaya + tubuh bergerak halus |
+| Variasi | Rotate pool — **jangan** selalu push-in saja |
+| Field JSON | `scenes[0].wow_effects` — array string, isi 1–2 label efek yang dipakai |
+
+**Pool efek (pilih & adapt ke produk):**
+
+| Efek | Frasa LTX (positif) | Cocok untuk |
+|------|---------------------|-------------|
+| Slow push-in | `the camera performs a very slow gentle push-in` | Semua — default kuat |
+| Handheld energy | `subtle handheld micro-sway like authentic smartphone capture` | Hook playful / fashion |
+| Golden light shift | `soft golden daylight gradually warms across the talent and product` | Skincare, apparel, lifestyle |
+| Bokeh drift | `shallow depth of field, soft background bokeh shifting gently` | Indoor cozy, bedroom |
+| Post-speech smile | `the expression shifts to a playful confident smile` | Setelah kutipan |
+| Product light catch | `one smooth natural product tilt catching a soft highlight` | Handheld, botol, gadget |
+| Fabric drape | `a slight shoulder shift revealing fabric drape and silhouette` | Wearable |
+| Confident micro-step | `a subtle weight shift with easy confident body language` | Full body apparel |
+
+**Larangan efek (→ `ltx_negative_prompt`, bukan `ltx_prompt`):** CGI, VFX explosion, lens flare spam, whip pan, crash zoom, strobe, glitch, oversaturated filter, scene cut, transition wipe, text overlay, speed ramp, freeze frame.
 
 ### `lip_sync_segment` scene 1
 
@@ -319,7 +386,8 @@ Frasa wajib `ltx_prompt`: `semi close-up product hero shot, product centered, so
 - `talent_identity` — **gender wajib dari analisis `talent_image` user** — sinkron dengan `voiceover_script.gender` & `voice_name`  
 - `gender_inferred_from` — wajib; 1 kalimat bukti visual dari upload  
 - `ethnicity`: default **`Indonesian`**  
-- `talent_identity.prompt` — `Indonesian man` **atau** `Indonesian woman` (match gender upload), `real smartphone UGC`, `natural skin texture`  
+- `talent_identity.prompt` — `Indonesian man` **atau** `Indonesian woman` + **`{PHRASE_ID}`** + **`{PHRASE_APPEAL}`** + **`{PHRASE_LIGHT_POSE}`**, `real smartphone UGC`, `natural skin texture`  
+- `talent_identity.outfit_lock` — **wearable:** garment produk. **Handheld:** produk di tangan natural  
 - `talent_identity.image_negative_avoid` — **wajib terisi** (konsistensi QA; scene 2 image gen pakai blok sama)  
 - `product_identity` — wajib untuk scene 2 image gen & `ltx_prompt`
 
@@ -335,7 +403,7 @@ stock photo, catalog photo, studio lighting, commercial photography, beauty reto
 
 | Scene | Generate? | `image[]` attach |
 |-------|-----------|------------------|
-| 1 | **Tidak** | — (pakai `talent_image` user) |
+| 1 | **Ya** | `[talent_image, product_images[0]]` (+ opsional `product_images[1]`) |
 | 2 | **Ya** | `[product_images[0]]` atau `[product_images[0], product_images[1]]` |
 
 ```json
@@ -351,21 +419,30 @@ stock photo, catalog photo, studio lighting, commercial photography, beauty reto
     "image_1": "product_primary",
     "image_2": "product_secondary_optional"
   },
-  "skip_talent_image_generation": true,
-  "trial_scene_1_init": "user_talent_upload",
-  "trial_scene_2_only": true,
+  "skip_talent_image_generation": false,
+  "trial_scene_1_init": "generated_talent_product",
+  "trial_scene_1_framing": "full_body_light_pose_product",
+  "trial_scene_2_only": false,
   "single_frame_rule": "One continuous photograph. No panels, grids, collage.",
   "product_hero_framing": "Semi close-up product only — scene 2",
-  "talking_head_framing": "User upload — scene 1; LLM does not write image_prompt for scene 1",
+  "scene_1_framing": "Full body light natural pose with product — face visible for lip sync",
   "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry"
 }
 ```
 
-### `image_prompt` — hanya scene 2
+### `image_prompt` — scene 1 & 2
 
-Bahasa **Inggris**. Struktur: `REFERENCE IMAGES` → `SCENE`. **Scene 1: `image_prompt` = `""`.**
+Bahasa **Inggris**. Struktur: `REFERENCE IMAGES` → `SCENE`.
 
-**Produk 1 file:**
+**Scene 1 — full body pose ringan + produk:**
+
+```text
+REFERENCE IMAGES: The first attached image is the talent reference — keep the same Indonesian face, ethnicity, hair, skin tone, and body proportions. The second attached image is the product reference — keep exact product shape, color, packaging, and labels. Apply product naturally on the talent's body (wearable) or in hands (handheld). Output one single continuous photograph only.
+
+SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. Full body shot, talent centered, relaxed light natural pose with product, easy casual styling, not stiff runway pose. Indonesian talent, Southeast Asian features, warm brown skin, naturally attractive photogenic face. Talent wears or holds [product_name] clearly visible — face large enough for lip sync, product not covering mouth. Real smartphone capture, natural skin texture, slightly imperfect composition. No text, UI, or watermark.
+```
+
+**Scene 2 — produk 1 file:**
 
 ```text
 REFERENCE IMAGES: The attached image is the product reference — keep the exact product shape, color, packaging, and labels identical. Do not add a person, hands, or face. Output one single continuous photograph only.
@@ -379,7 +456,7 @@ SCENE: One single full-frame photograph. [environment_lock], soft natural daylig
 
 ## `negative_prompt`
 
-**Scene 1** (LTX): artefak wajah + `panel layout, text, UI, watermark, distorted hands, morphing, warping, flicker, extreme close-up`
+**Scene 1** (image gen + LTX): `{NEG_UNATTRACTIVE}` + `tiny distant subject, stiff runway pose, dramatic fashion pose, product covering mouth, panel layout, text, UI, watermark, distorted hands, morphing, warping, flicker`
 
 **Scene 2** (image gen + LTX) — wajib gabungkan:
 
@@ -398,7 +475,8 @@ stock photo, catalog photo, studio lighting, commercial photography, beauty reto
 ## `ltx_prompt` & `ltx_negative_prompt` (LTX I2V — `guide_ltx.md`)
 
 - **Bahasa Inggris**, **4–6 kalimat**, tone di depan  
-- Scene 1: evolusi temporal dari **upload user** — bicara + satu gestur kecil; dialog kutip verbatim; **hanya** deskripsi positif  
+- Scene 1: evolusi temporal dari **first frame full body + produk** — `{SPEAKS}` dulu → lalu **1–2 efek `{PHRASE_WOW}`** + gestur casual; **hanya** deskripsi positif  
+- Scene 1 struktur: `[1 kalimat tone+shot]` → **`The talent looks directly into the camera and speaks "…"`** → `[wow 1–2]` → `faint room tone. Photorealistic.`  
 - Scene 2: static atau very slow push-in pada produk  
 - **`ltx_prompt`:** positif saja — **dilarang** `TikTok`, `UGC`, `no/not/without`, `subtle natural lip movement`  
 - **`ltx_negative_prompt`:** semua larangan visual/artefak (termasuk `no speech`, `no person` untuk scene 2)  
@@ -406,12 +484,13 @@ stock photo, catalog photo, studio lighting, commercial photography, beauty reto
 
 ### Aturan bicara eksplisit — scene 1 `trial_talent` (wajib)
 
-LTX memicu bicara hanya jika aksi **langsung**: `The talent speaks "[lip_sync_segment]"` — **tanpa** `in a … tone`, **tanpa** `while speaking` ([LTX prompt guide](https://ltx.io/blog/ai-video-prompt-guide)).
+LTX memicu bicara hanya jika aksi **langsung** + kutipan. Pola **wajib** = `{SPEAKS}` — **hanya** `The talent looks directly into the camera and speaks "[lip_sync_segment]"` ([LTX prompt guide](https://ltx.io/blog/ai-video-prompt-guide)).
 
 | Rule | Nilai |
 |------|--------|
-| Pola terkuat (testing) | `...direct eye contact, eyes locked on lens and speaks "[quote]"` |
-| Pola wajib | `The talent speaks "[quote]"` — **tanpa** apa pun sebelum `speaks` |
+| Pola wajib (satu-satunya) | `The talent looks directly into the camera and speaks "[quote]"` — **langsung** setelah 1 kalimat framing |
+| Larangan | `The talent speaks` tanpa `looks directly into the camera`; deskripsi panjang sebelum `The talent looks…` |
+| Larangan basa-basi | `direct eye contact`, `eyes locked on lens` sebelum `speaks` — **dilarang** (lip sync mati) |
 | Kutipan | `lip_sync_segment` **verbatim** dalam kutip — langsung setelah `speaks` |
 | Frasa gerak bibir | `with clear lip movement fully in sync with the spoken line` |
 | Larangan pre-speech | `starts with a playful smile`, `starts with a playful amused smile`, `begins with a smile` sebelum `speaks` — **dilarang** (lip sync mati) |
@@ -423,19 +502,19 @@ LTX memicu bicara hanya jika aksi **langsung**: `The talent speaks "[lip_sync_se
 
 | scene_type | Audio | Gerakan |
 |------------|-------|---------|
-| `trial_talent` | talking_head | Static chest-up; full `lip_sync_segment` dalam kutip + lipsync kuat; gesture kecil |
+| `trial_talent` | talking_head | Full body pose ringan + produk; `{SPEAKS}`; lalu **1–2 wow effect** (push-in / light / bokeh / product tilt) |
 | `product_hero` | b_roll | Static/slow push-in produk; faint room tone |
 
 ### Contoh scene 1 (trial_talent, 5 dtk)
 
 **`ltx_prompt`:**
 ```text
-Realistic documentary-style footage, soft natural daylight. Medium close-up chest-up, subject centered, static handheld selfie framing. The talent looks directly into the camera with direct eye contact, eyes locked on lens and speaks "Kalau kamu nasi, aku sambelnya — botol ini kece sih. Ngaku aja, awalnya skeptis, ternyata praktis banget. Klik keranjang kuning aja," with clear lip movement fully in sync with the spoken line. One small natural hand gesture mid-sentence and a friendly expression throughout. Faint room tone. Photorealistic.
+Realistic documentary-style footage, soft natural daylight. Full body shot. The talent looks directly into the camera and speaks "Kalau kamu nasi, aku sambelnya — botol ini kece sih. Ngaku aja, awalnya skeptis, ternyata praktis banget. Klik keranjang kuning aja," with clear lip movement fully in sync with the spoken line. Relaxed light natural pose wearing or holding the product. The camera performs a very slow gentle push-in as soft golden daylight gradually warms across the talent and product, the expression shifts to a playful confident smile, and one smooth natural product tilt catches a soft highlight. Subtle handheld micro-sway like authentic smartphone capture. Faint room tone. Photorealistic.
 ```
 
 **`ltx_negative_prompt`:**
 ```text
-no lip movement, no lip sync, subtle natural lip movement, on-screen text, logos, UI, watermark, morphing, flicker
+no lip movement, no lip sync, subtle natural lip movement, tiny distant subject, stiff runway pose, product covering mouth, CGI, VFX, lens flare spam, whip pan, crash zoom, strobe, glitch, oversaturated filter, scene cut, transition wipe, on-screen text, logos, UI, watermark, morphing, flicker
 ```
 
 ### Contoh scene 2 (product_hero, 5 dtk)
@@ -469,7 +548,8 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
     "continuity_mode": "reference_only",
     "scene_count": 2,
     "trial_mode": true,
-    "skip_talent_image_generation": true,
+    "skip_talent_image_generation": false,
+    "trial_scene_1_framing": "full_body_light_pose_product",
     "product_name": "",
     "category": "",
     "target_audience": "",
@@ -486,7 +566,8 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "emotion_tone": "playful → yakin singkat → tenang showcase",
       "energy_level": "medium-high",
       "pacing": "fast hook + CTA di scene 1, tutup tenang product hero",
-      "acting_style": "authentic TikTok review"
+      "acting_style": "authentic TikTok review",
+      "scene_1_wow_level": "medium"
     },
     "stitch": {
       "enabled": true,
@@ -494,7 +575,7 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "target_seconds": 10,
       "ltx_clips_sum_seconds": 10,
       "clip_order": "scene_id ascending",
-      "note": "2 LTX clips 5s+5s; scene 1 user talent upload, scene 2 product hero"
+      "note": "2 LTX clips 5s+5s; scene 1 full body light pose + product, scene 2 product hero"
     },
     "image_generation": {
       "api": "openai_v1_images_edits",
@@ -502,8 +583,9 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "aspect_ratio": "9:16",
       "size": "1024x1536",
       "product_image_count": 1,
-      "skip_talent_image_generation": true,
-      "trial_scene_1_init": "user_talent_upload",
+      "skip_talent_image_generation": false,
+    "trial_scene_1_framing": "full_body_light_pose_product",
+      "trial_scene_1_init": "generated_talent_product",
       "product_hero_scene_id": 2,
       "product_hero_attach": "product_only",
       "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry"
@@ -559,13 +641,14 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "duration_seconds": 5.0,
       "audio_mode": "talking_head",
       "audio_start": 0,
-      "framing": "chest_up_close",
+      "framing": "full_body_light_pose",
       "lip_sync_segment": "",
+      "wow_effects": [],
       "consistency": {
         "use_model_reference": true,
-        "use_product_reference": false,
-        "generate_first_frame": false,
-        "init_image_source": "user_talent_upload",
+        "use_product_reference": true,
+        "generate_first_frame": true,
+        "init_image_source": "generated_talent_product",
         "continuity_mode": "reference_only",
         "continuity_image_from": null
       },
@@ -573,8 +656,8 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
       "negative_prompt": "",
       "ltx_prompt": "",
       "ltx_negative_prompt": "",
-      "camera": "static chest-up selfie",
-      "avoid": "extreme close-up, product covering mouth, paraphrased dialogue, no lip movement, no lip sync, no speaking to camera, listening to voiceover, no speech, subtle natural lip movement"
+      "camera": "very slow push-in or subtle handheld",
+      "avoid": "tiny distant subject, stiff runway pose, product covering mouth, paraphrased dialogue, no lip movement, no lip sync, no speaking to camera, listening to voiceover, no speech, subtle natural lip movement"
     },
     {
       "scene_id": 2,
@@ -610,7 +693,7 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
 
 | Nilai | Scene |
 |-------|--------|
-| `chest_up_close` | 1 — talking head (user upload) |
+| `full_body_light_pose` | 1 — full body pose ringan + produk |
 | `product_semi_close` | 2 — object/handheld hero |
 | `product_hanging_display` | 2 — wearable (hanger/mannequin) |
 
@@ -619,10 +702,13 @@ speech, person, hands entering frame, on-screen text, logos, UI, watermarks, mor
 ## Backend pseudocode
 
 ```text
-// Scene 1 — SKIP image generation
-assert scenes[0].consistency.generate_first_frame == false
-assert scenes[0].consistency.init_image_source == "user_talent_upload"
-first_frame[1] = normalize_aspect(talent_image, meta.aspect_ratio)
+// Scene 1 — full body light pose + product
+assert scenes[0].consistency.generate_first_frame == true
+assert scenes[0].consistency.use_product_reference == true
+files_s1 = [talent_image, product_images[0]]
+if meta.image_generation.product_image_count == 2: files_s1.push(product_images[1])
+POST /v1/images/edits { image: files_s1, prompt: scenes[0].image_prompt, negative: scenes[0].negative_prompt, size: ... }
+first_frame[1] = response.image
 
 // Scene 2 — product hero image gen only
 files = [product_images[0]]
@@ -668,20 +754,23 @@ assert word_count in [12, 18]
 - [ ] Output = pure JSON saja  
 - [ ] `meta.spec_variant` = `ugc_free_trial`; `trial_mode` = true  
 - [ ] **2 scenes**, sum duration = **10**, stitch target = **10**  
-- [ ] Scene 1: `trial_talent`, 5s, `talking_head`, `generate_first_frame: false`, `init_image_source: user_talent_upload`, `image_prompt: ""`  
+- [ ] Scene 1: `trial_talent`, 5s, **full body pose ringan + produk**, `generate_first_frame: true`, `use_product_reference: true`, `image_prompt` terisi  
 - [ ] Scene 2: `product_hero`, 5s, `b_roll`, `generate_first_frame: true`, produk saja, `use_model_reference: false`  
 - [ ] `talent_identity.image_negative_avoid` + scene 2 `negative_prompt`: blok `anti_studio_negative` terisi (anti tabloid/studio/glamour/CGI)  
-- [ ] `skip_talent_image_generation: true` di `meta`  
+- [ ] `skip_talent_image_generation: false`; `trial_scene_1_framing: full_body_light_pose_product`  
 - [ ] `voiceover_script` **12–18 kata**; punch line lucu bodoh; `tts_script` = `[fast] ` + `script`  
 - [ ] **`skeptic_bridge_opener` terisi** — variasi pembuka skeptis; **bukan** selalu `Jujur` / `Awalnya ragu`  
 - [ ] Rotate pool jembatan: `Ngaku aja`, `Kirain`, `Pas dicek`, `Nggak nyangka`, dll.  
-- [ ] Scene 1 pola **`...eyes locked on lens and speaks "[quote]"`** atau **`The talent speaks "[quote]"`** — **tanpa** `starts with a smile` sebelum `speaks`  
+- [ ] Scene 1 `ltx_prompt`: **langsung** `The talent looks directly into the camera and speaks "[quote]"` — maks 1 kalimat framing sebelumnya; pose/wow **setelah** kutipan  
+- [ ] Scene 1 **`wow_effects`** terisi **1–2** item; efek memukau di `ltx_prompt` **setelah** kutipan — variasi (bukan selalu push-in)  
+- [ ] Scene 1 `ltx_negative_prompt` anti-CGI/VFX/whip pan/strobe/glitch  
 - [ ] Scene 1 `lip_sync_segment` kutip verbatim + `clear lip movement fully in sync`  
 - [ ] Scene 1 `ltx_prompt` positif saja; larangan di **`ltx_negative_prompt`**  
 - [ ] Scene 2 `ltx_prompt` positif; larangan person/hands di **`ltx_negative_prompt`**  
 - [ ] **`talent_identity.gender` = `voiceover_script.gender`** — dari analisis **`talent_image` user**, bukan tebakan produk  
 - [ ] `talent_identity.gender_inferred_from` terisi (bukti visual upload)  
-- [ ] `talent_identity.prompt` pakai **`Indonesian man`** / **`Indonesian woman`** sesuai gender — bukan lawan katanya  
+- [ ] `talent_identity.prompt` pakai **`Indonesian man`** / **`Indonesian woman`** + **`{PHRASE_APPEAL}`** — talent menarik/photogenic, bukan plain/average  
+- [ ] Scene 1 `ltx_prompt` + `ltx_negative_prompt`: sertakan `{PHRASE_APPEAL}`; negative tambah `{NEG_UNATTRACTIVE}`  
 - [ ] `voice_name` ∈ `allowed_voices[gender]` — **bukan** suara gender berlawanan (pria → bukan Aoede/Kore; wanita → bukan Puck/Charon)  
 - [ ] `voice_selection_rationale` terisi — sebut gender + tone  
 - [ ] `meta.talent_gender_source` = `user_talent_upload`  
@@ -704,4 +793,4 @@ assert word_count in [12, 18]
 
 Response LLM = **hanya** objek JSON skema di atas (2 scene terisi penuh).
 
-**Ringkas alur trial:** Layar 1 user upload talent → scene 1 LTX lip sync 5s tanpa generate gambar → scene 2 generate + render product hero 5s → stitch 10 detik.
+**Ringkas alur trial:** User upload talent + produk → scene 1 **generate** full body pose ringan + produk → LTX `{SPEAKS}` 5s → scene 2 product hero 5s → stitch 10 detik.

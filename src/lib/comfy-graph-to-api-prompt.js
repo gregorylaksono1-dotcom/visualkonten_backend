@@ -466,6 +466,7 @@ const WIDGET_INPUT_KEYS_BY_TYPE = {
   ComfyMathExpression: ["expression"],
   EmptyLTXVLatentVideo: ["width", "height", "length", "batch_size"],
   VAEDecodeTiled: ["tile_size", "overlap", "temporal_size", "temporal_overlap"],
+  SaveVideoFilesS3: ["filename_prefix"],
 };
 
 module.exports = { graphToApiPrompt };

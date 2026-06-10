@@ -15,6 +15,12 @@ const { buildLtxPromptFields } = require("../lib/build-ltx-prompt");
 const DEFAULT_ANTI_STUDIO_NEGATIVE =
   "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry";
 
+const TALENT_APPEAL_PHRASE =
+  "naturally attractive, photogenic face, pleasant appealing features, charismatic everyday creator look";
+
+const DEFAULT_TALENT_PORTRAIT_PROMPT =
+  "Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look, chest-up portrait, soft natural window daylight, real smartphone photo, natural skin texture, photorealistic UGC style";
+
 function resolveTalentImageNegative(llmResponse) {
   return (
     String(llmResponse?.talent_identity?.image_negative_avoid || "").trim() ||
@@ -27,6 +33,29 @@ function appendAvoidNegative(prompt, negative) {
   const neg = String(negative || "").trim();
   if (!neg) return prompt;
   return `${String(prompt || "").trim()}. Avoid: ${neg}.`;
+}
+
+function hasTalentAppealPhrase(text) {
+  return /attractive|photogenic|appealing|charismatic/i.test(String(text || ""));
+}
+
+function buildTalentPortraitPrompt(llmResponse) {
+  const tid = llmResponse?.talent_identity || {};
+  const parts = [];
+  if (tid.prompt) parts.push(tid.prompt);
+  if (tid.gender) parts.push(`gender: ${tid.gender}`);
+  if (tid.age_range) parts.push(`age range: ${tid.age_range}`);
+  if (tid.outfit_lock) parts.push(`outfit: ${tid.outfit_lock}`);
+  if (tid.hair_lock) parts.push(`hair style: ${tid.hair_lock}`);
+  if (tid.ethnicity) parts.push(`ethnicity: ${tid.ethnicity}`);
+
+  if (parts.length === 0) {
+    parts.push(DEFAULT_TALENT_PORTRAIT_PROMPT);
+  } else if (!hasTalentAppealPhrase(parts.join(", "))) {
+    parts.push(TALENT_APPEAL_PHRASE);
+  }
+
+  return appendAvoidNegative(parts.join(", "), resolveTalentImageNegative(llmResponse));
 }
 
 function resolveSceneTalkvid(scene) {
@@ -49,10 +78,13 @@ function resolveSceneTalkvid(scene) {
 async function generateMultiScenePipeline(params) {
   const {
     jobId, userEmail, userId, currentS3ImageUrls, llmResponse, finalJobPrompt, videoQuality, aspectRatio,
-    S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, comfyApiKey, audio, audioDuration, requestType
+    S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, audio, audioDuration, requestType
   } = params;
 
   console.log(`[MultiSceneGen] Starting dynamic multi-scene pipeline for job ${jobId}`);
+
+  let comfyApiKey = params.comfyApiKey;
+  let redis = null;
 
   try {
     const apiKey = await getOpenAiKey();
@@ -76,18 +108,13 @@ async function generateMultiScenePipeline(params) {
     }
 
     const generatedScenes = [];
-    const sceneImageFilenames = [];
 
     // 1. Generate the talent image (1st generation) - Skip for FREE-TRIAL
     let generatedTalentImageUrl = null;
     let talentS3Key = null;
 
     if (requestType !== "FREE-TRIAL") {
-      const talentNegative = resolveTalentImageNegative(llmResponse);
-      let talentPrompt =
-        llmResponse.talent_identity?.prompt ||
-        "Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, friendly everyday UGC creator, chest-up portrait, soft natural window daylight, real smartphone photo, natural skin texture, photorealistic UGC style";
-      talentPrompt = appendAvoidNegative(talentPrompt, talentNegative);
+      const talentPrompt = buildTalentPortraitPrompt(llmResponse);
       console.log(`[MultiSceneGen] Generating talent image with prompt: "${talentPrompt.slice(0, 60)}..."`);
       const { buffer: talentBuffer, fallbackUrl: talentFallbackUrl } = await callOpenAIImageEdit({
         apiKey,
@@ -113,7 +140,7 @@ async function generateMultiScenePipeline(params) {
 
     const folder = "generated_image";
 
-    // B. Generate first frames for each scene
+    // 2. Generate first frames for each scene (Save to S3, do not upload to ComfyUI yet)
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
       const sceneId = scene.scene_id || (i + 1);
@@ -123,34 +150,32 @@ async function generateMultiScenePipeline(params) {
         let sceneReferenceUrls = [];
 
         if (i === 0) {
-          // Scene 1: Talent image generation using all fields from talent_identity
-          const tid = llmResponse.talent_identity || {};
-          const parts = [];
-          if (tid.prompt) parts.push(tid.prompt);
-          if (tid.gender) parts.push(`gender: ${tid.gender}`);
-          if (tid.age_range) parts.push(`age range: ${tid.age_range}`);
-          if (tid.outfit_lock) parts.push(`outfit: ${tid.outfit_lock}`);
-          if (tid.hair_lock) parts.push(`hair style: ${tid.hair_lock}`);
-          if (tid.ethnicity) parts.push(`ethnicity: ${tid.ethnicity}`);
-          
-          if (parts.length === 0) {
-            parts.push("UGC talent portrait");
-          }
+          // Scene 1: full body talent + product — talent ref + product ref
+          scenePrompt = scene.image_prompt || buildTalentPortraitPrompt(llmResponse);
+          const negativePrompt = String(scene.negative_prompt || "").trim();
           scenePrompt = appendAvoidNegative(
-            parts.join(", "),
-            resolveTalentImageNegative(llmResponse)
+            scenePrompt,
+            negativePrompt || resolveTalentImageNegative(llmResponse)
           );
-          // Use user's uploaded talent image as reference (OpenAI edit API requires at least one image)
-          sceneReferenceUrls = currentS3ImageUrls[0] ? [currentS3ImageUrls[0]] : [];
+          const useModelRef = scene.consistency?.use_model_reference !== false;
+          const useProductRef = scene.consistency?.use_product_reference !== false;
+          if (useModelRef && useProductRef) {
+            sceneReferenceUrls = [currentS3ImageUrls[0], currentS3ImageUrls[1]].filter(Boolean);
+          } else if (useModelRef) {
+            sceneReferenceUrls = currentS3ImageUrls[0] ? [currentS3ImageUrls[0]] : [];
+          } else {
+            sceneReferenceUrls = currentS3ImageUrls.slice(1).filter(Boolean);
+          }
         } else {
-          // Scene 2: Product image generation using scenes[1].image_prompt (or fallback to scene.image_prompt)
           scenePrompt = scene.image_prompt || finalJobPrompt;
           scenePrompt = appendAvoidNegative(
             scenePrompt,
             scene.negative_prompt || resolveTalentImageNegative(llmResponse)
           );
-          // Reference is both talent image (currentS3ImageUrls[0]) and product image (currentS3ImageUrls[1]) if available
-          sceneReferenceUrls = [currentS3ImageUrls[0], currentS3ImageUrls[1]].filter(Boolean);
+          sceneReferenceUrls = currentS3ImageUrls.slice(1).filter(Boolean);
+        }
+        if (sceneReferenceUrls.length === 0 && currentS3ImageUrls.length > 0) {
+          sceneReferenceUrls = [currentS3ImageUrls[0]];
         }
 
         console.log(`[MultiSceneGen] [FREE-TRIAL] Generating image for Scene ${sceneId}: "${scenePrompt.slice(0, 80)}..."`);
@@ -173,34 +198,23 @@ async function generateMultiScenePipeline(params) {
         const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
         const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
 
-        console.log(`[MultiSceneGen] Uploading Scene ${sceneId} image to ComfyUI Cloud...`);
-        const comfyImageName = await uploadInputImage(signedUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
-
         generatedScenes.push({
           scene_id: sceneId,
           s3_key: s3Key,
-          url: signedUrl,
-          comfy_image_name: comfyImageName
+          url: signedUrl
         });
-
-        sceneImageFilenames.push(comfyImageName);
 
       } else {
         if (scene.consistency?.generate_first_frame === false) {
-          // Skip image generation, use the user uploaded talent image directly (currentS3ImageUrls[0])
           const imageUrl = currentS3ImageUrls[0];
           console.log(`[MultiSceneGen] Scene ${sceneId} generate_first_frame is false. Using user uploaded image directly: ${imageUrl}`);
-          const comfyImageName = await uploadInputImage(imageUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
 
           generatedScenes.push({
             scene_id: sceneId,
             s3_key: null,
-            url: imageUrl,
-            comfy_image_name: comfyImageName
+            url: imageUrl
           });
-          sceneImageFilenames.push(comfyImageName);
         } else {
-          // Generate scene first frame
           let scenePrompt = scene.image_prompt || finalJobPrompt;
           const negativePrompt = String(scene.negative_prompt || "").trim();
           if (negativePrompt) {
@@ -232,112 +246,18 @@ async function generateMultiScenePipeline(params) {
           const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
           const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
 
-          // 2. Upload to ComfyUI Cloud
-          console.log(`[MultiSceneGen] Uploading Scene ${sceneId} image to ComfyUI Cloud...`);
-          const comfyImageName = await uploadInputImage(signedUrl, `${jobId}_scene_${sceneId}.png`, comfyApiKey);
-
           generatedScenes.push({
             scene_id: sceneId,
             s3_key: s3Key,
-            url: signedUrl,
-            comfy_image_name: comfyImageName
+            url: signedUrl
           });
-
-          sceneImageFilenames.push(comfyImageName);
         }
       }
     }
 
-    // 3. Upload TTS Audio to ComfyUI Cloud
-    let comfyAudioName = null;
-    if (audio && typeof audio === "string" && audio !== "null" && audio !== "undefined" && audio.trim() !== "") {
-      console.log(`[MultiSceneGen] Uploading TTS Audio to ComfyUI Cloud... Key: "${audio}"`);
-      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audio });
-      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
-      comfyAudioName = await uploadInputAudio(audioSignedUrl, `${jobId}_tts.wav`, comfyApiKey);
-    } else {
-      console.log(`[MultiSceneGen] No valid audio key provided (received: ${JSON.stringify(audio)}). Skipping audio upload.`);
-    }
-
-    // 4. Calculate dimensions for buildMultiSceneWorkflow
-    let w = 720, h = 1280; // default 9:16
-    if (videoQuality === "1080p") {
-      if (aspectRatio === "16:9") { w = 1920; h = 1080; }
-      else if (aspectRatio === "1:1") { w = 1080; h = 1080; }
-      else { w = 1080; h = 1920; } // 9:16
-    } else {
-      if (aspectRatio === "16:9") { w = 1280; h = 720; }
-      else if (aspectRatio === "1:1") { w = 720; h = 720; }
-      else { w = 720; h = 1280; } // 9:16
-    }
-
-    // Calculate total duration from scenes first, and maximize the last scene if total < targetMinDuration
-    let totalSceneDuration = 0;
-    for (let i = 0; i < scenes.length; i++) {
-      totalSceneDuration += Number(scenes[i].duration_seconds || 4);
-    }
-
-    const targetMinDuration = requestType === "FREE-TRIAL" ? 10 : 20;
-    if (totalSceneDuration < targetMinDuration && scenes.length > 0) {
-      const diff = targetMinDuration - totalSceneDuration;
-      const lastIndex = scenes.length - 1;
-      const originalDuration = Number(scenes[lastIndex].duration_seconds || 4);
-      scenes[lastIndex].duration_seconds = originalDuration + diff;
-      console.log(`[MultiSceneGen] Adjusting last scene duration. Added ${diff}s to Scene ${lastIndex + 1}. New duration: ${scenes[lastIndex].duration_seconds}s.`);
-    }
-
-    // 5. Construct scenes array for workflow builder
-    let currentAudioStart = 0;
-    const workflowScenes = [];
-    for (let i = 0; i < scenes.length; i++) {
-      const scene = scenes[i];
-      const duration = Number(scene.duration_seconds || 4);
-
-      const built = buildLtxPromptFields(scene);
-      workflowScenes.push({
-        title: scene.scene_name || `Scene ${scene.scene_id || (i + 1)}`,
-        image: sceneImageFilenames[i],
-        audioStart: currentAudioStart,
-        duration: duration,
-        prompt: built.ltx_prompt || scene.ltx_prompt || "",
-        ltx_negative_prompt: built.ltx_negative_prompt || scene.ltx_negative_prompt || "",
-        negative_prompt: built.ltx_negative_prompt || scene.ltx_negative_prompt || "",
-        talkvid: resolveSceneTalkvid(scene),
-      });
-      currentAudioStart += duration;
-    }
-
-    // 6. Build and convert workflow
-    console.log(`[MultiSceneGen] Building dynamic workflow for ${scenes.length} scenes...`);
-    const workflow = buildMultiSceneWorkflow(workflowScenes, {
-      baseFile: path.join(__dirname, "..", "workflow", "base1scene.json"),
-      audioFile: comfyAudioName,
-      audioPad: 22,
-      resolution: videoQuality === "1080p" ? "1080p" : "720p",
-      width: w,
-      height: h,
-      upscale: videoQuality === "1080p" ? Math.max(w, h) * 1.2 : Math.max(w, h)
-    });
-
-    // Make sure asset filenames are explicitly applied in node values
-    applyWorkflowAssetFilenames(workflow, {
-      audioFilename: comfyAudioName,
-      sceneImageFilenames
-    });
-
-    const apiPrompt = graphToApiPrompt(workflow);
-    applySceneNegativePrompts(apiPrompt, workflowScenes);
-
-    console.log("[MultiSceneGen] Workflow JSON for debugging:\n" + JSON.stringify(apiPrompt, null, 2));
-
-    // 7. Submit Video Job to ComfyUI Cloud
-    console.log(`[MultiSceneGen] Submitting multi-scene workflow to ComfyUI Cloud...`);
-    const videoPromptId = await submitWorkflow(apiPrompt, comfyApiKey);
-    console.log(`[MultiSceneGen] Submitted successfully. Prompt ID: ${videoPromptId}`);
-
-    // 8. Update DynamoDB with generated images & comfy_prompt_id
+    // 3. Update DynamoDB with generated S3 asset keys first (so recoveryCron can find them)
     const primaryS3Key = generatedScenes.find(gs => gs.s3_key)?.s3_key || null;
-    const updateExpr = ["generated_image = :genImg", "generated_scenes = :genScenes", "comfy_prompt_id = :vp", "#s = :status", "used_api_key = :uak", "updated_at = :now"];
+    const updateExpr = ["generated_image = :genImg", "generated_scenes = :genScenes", "updated_at = :now"];
     const exprValues = {
       ":genImg": primaryS3Key,
       ":genScenes": generatedScenes.map(gs => ({
@@ -345,9 +265,6 @@ async function generateMultiScenePipeline(params) {
         s3_key: gs.s3_key,
         url: gs.url
       })),
-      ":vp": videoPromptId,
-      ":status": "PROCESSING",
-      ":uak": comfyApiKey || null,
       ":now": getJakartaISOString()
     };
     if (talentS3Key) {
@@ -371,14 +288,168 @@ async function generateMultiScenePipeline(params) {
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
       UpdateExpression: "SET " + updateExpr.join(", "),
-      ExpressionAttributeNames: { "#s": "status" },
       ExpressionAttributeValues: exprValues
+    }));
+
+    // 4. Predict ComfyUI filenames and construct workflow
+    const comfyAudioName = audio ? `${jobId}_tts.wav` : null;
+    const comfyTalentImageName = talentS3Key ? `${jobId}_talent.png` : null;
+    const sceneImageFilenames = generatedScenes.map(gs => `${jobId}_scene_${gs.scene_id}.png`);
+
+    let w = 720, h = 1280; // default 9:16
+    if (videoQuality === "1080p") {
+      if (aspectRatio === "16:9") { w = 1920; h = 1080; }
+      else if (aspectRatio === "1:1") { w = 1080; h = 1080; }
+      else { w = 1080; h = 1920; } // 9:16
+    } else {
+      if (aspectRatio === "16:9") { w = 1280; h = 720; }
+      else if (aspectRatio === "1:1") { w = 720; h = 720; }
+      else { w = 720; h = 1280; } // 9:16
+    }
+
+    let totalSceneDuration = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      totalSceneDuration += Number(scenes[i].duration_seconds || 4);
+    }
+
+    const targetMinDuration = requestType === "FREE-TRIAL" ? 10 : 20;
+    if (totalSceneDuration < targetMinDuration && scenes.length > 0) {
+      const diff = targetMinDuration - totalSceneDuration;
+      const lastIndex = scenes.length - 1;
+      const originalDuration = Number(scenes[lastIndex].duration_seconds || 4);
+      scenes[lastIndex].duration_seconds = originalDuration + diff;
+      console.log(`[MultiSceneGen] Adjusting last scene duration. Added ${diff}s to Scene ${lastIndex + 1}. New duration: ${scenes[lastIndex].duration_seconds}s.`);
+    }
+
+    const workflowScenes = [];
+    let currentAudioStart = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
+      const duration = Number(scene.duration_seconds || 4);
+
+      const built = buildLtxPromptFields(scene);
+      workflowScenes.push({
+        title: scene.scene_name || `Scene ${scene.scene_id || (i + 1)}`,
+        image: sceneImageFilenames[i], // Predicted filename
+        audioStart: currentAudioStart,
+        duration: duration,
+        prompt: built.ltx_prompt || scene.ltx_prompt || "",
+        ltx_negative_prompt: built.ltx_negative_prompt || scene.ltx_negative_prompt || "",
+        negative_prompt: built.ltx_negative_prompt || scene.ltx_negative_prompt || "",
+        talkvid: resolveSceneTalkvid(scene),
+      });
+      currentAudioStart += duration;
+    }
+
+    console.log(`[MultiSceneGen] Building dynamic workflow for ${scenes.length} scenes...`);
+    const runpod = process.env.RUNPOD === "true";
+    const s3FilenamePrefix = `${userId || "anonymous"}_${jobId}`;
+
+    const workflow = buildMultiSceneWorkflow(workflowScenes, {
+      baseFile: path.join(__dirname, "..", "workflow", "base1scene.json"),
+      audioFile: comfyAudioName,
+      audioPad: 22,
+      resolution: videoQuality === "1080p" ? "1080p" : "720p",
+      width: w,
+      height: h,
+      upscale: videoQuality === "1080p" ? Math.max(w, h) * 1.2 : Math.max(w, h),
+      runpod,
+      s3FilenamePrefix
+    });
+
+    applyWorkflowAssetFilenames(workflow, {
+      audioFilename: comfyAudioName,
+      sceneImageFilenames
+    });
+
+    const apiPrompt = graphToApiPrompt(workflow);
+    applySceneNegativePrompts(apiPrompt, workflowScenes);
+
+    console.log("[MultiSceneGen] Workflow JSON for debugging:\n" + JSON.stringify(apiPrompt, null, 2));
+
+    // 5. Try to pick ComfyUI API Key right before uploading/submitting
+    if (!comfyApiKey) {
+      const { pickComfyApiKey, getComfyApiKeys, getRedis } = require("../services");
+      const apiKeysString = await getComfyApiKeys();
+      redis = getRedis();
+      comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
+    }
+
+    if (!comfyApiKey) {
+      console.log(`[MultiSceneGen] All ComfyUI API keys are busy. Concurrency limit reached.`);
+      const err = new Error("All ComfyUI API keys are busy (Concurrency Limit)");
+      err.statusCode = 420;
+      err.workflow = apiPrompt;
+      throw err;
+    }
+
+    // 6. Upload assets to ComfyUI Cloud
+    // Upload talent image
+    if (talentS3Key && generatedTalentImageUrl) {
+      console.log(`[MultiSceneGen] Uploading talent image to ComfyUI Cloud...`);
+      await uploadInputImage(generatedTalentImageUrl, `${jobId}_talent.png`, comfyApiKey);
+    }
+
+    // Upload generated scene images
+    for (let i = 0; i < generatedScenes.length; i++) {
+      const gs = generatedScenes[i];
+      const imageUrl = gs.url;
+      const comfyImageName = sceneImageFilenames[i];
+      console.log(`[MultiSceneGen] Uploading Scene ${gs.scene_id} image to ComfyUI Cloud...`);
+      const returnedName = await uploadInputImage(imageUrl, comfyImageName, comfyApiKey);
+      
+      const nodeId = String(2000 + i);
+      if (apiPrompt[nodeId] && apiPrompt[nodeId].inputs) {
+        apiPrompt[nodeId].inputs.image = returnedName;
+        console.log(`[MultiSceneGen] Updated Node ${nodeId} input image to: ${returnedName}`);
+      }
+    }
+
+    // Upload TTS Audio
+    if (audio && comfyAudioName) {
+      console.log(`[MultiSceneGen] Uploading TTS Audio to ComfyUI Cloud...`);
+      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audio });
+      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
+      const returnedAudioName = await uploadInputAudio(audioSignedUrl, comfyAudioName, comfyApiKey);
+      
+      if (apiPrompt["611"] && apiPrompt["611"].inputs) {
+        apiPrompt["611"].inputs.audio = returnedAudioName;
+        console.log(`[MultiSceneGen] Updated Node 611 input audio to: ${returnedAudioName}`);
+      }
+    }
+
+    // 7. Submit Video Job to ComfyUI Cloud
+    console.log(`[MultiSceneGen] Submitting multi-scene workflow to ComfyUI Cloud...`);
+    const videoPromptId = await submitWorkflow(apiPrompt, comfyApiKey);
+    console.log(`[MultiSceneGen] Submitted successfully. Prompt ID: ${videoPromptId}`);
+
+    // 8. Update status to PROCESSING and set comfy_prompt_id / used_api_key
+    await dynamo.send(new UpdateCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      UpdateExpression: "SET comfy_prompt_id = :vp, #s = :status, used_api_key = :uak, updated_at = :now",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":vp": videoPromptId,
+        ":status": "PROCESSING",
+        ":uak": comfyApiKey || null,
+        ":now": getJakartaISOString()
+      }
     }));
 
     return videoPromptId;
 
   } catch (err) {
     console.error(`[MultiSceneGen] Error in multi-scene generation pipeline:`, err);
+    if (comfyApiKey && redis) {
+      try {
+        const redisKey = `comfyui_job_${comfyApiKey}`;
+        await redis.decr(redisKey);
+        console.log(`[MultiSceneGen] [Redis] Decremented ${redisKey} due to pipeline failure`);
+      } catch (rErr) {
+        console.error("[MultiSceneGen] [Redis] Error decrementing:", rErr.message);
+      }
+    }
     throw err;
   }
 }

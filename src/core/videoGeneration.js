@@ -22,7 +22,6 @@ async function generateComfyUIVideo(params) {
     imageResultUrl, // first_frame: reveal_start (PRODUCT) or talent (UGC-P) or single image
     productFrameUrl, // last_frame: hero (PRODUCT) or product_frame (UGC-P)
     transitionFrameUrl, // mid_frame (PRODUCT 3-keyframe, optional)
-    used_api_key,
     dynamo, s3, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET
   } = params;
 
@@ -34,26 +33,20 @@ async function generateComfyUIVideo(params) {
   const audioDuration = audio_duration;
   const videoQuality = video_quality;
   const aspectRatio = aspect_ratio;
-  const usedApiKey = used_api_key;
+
+  let usedApiKey = params.used_api_key;
+  let redis = null;
 
   console.log(`[VideoGen] Triggering Video Generation for job ${jobId}...`);
 
   try {
-    // 1. Get Signed URL for Audio (since ComfyUI needs to download it)
-    let comfyAudioName = null;
-    if (audioKey && typeof audioKey === "string" && audioKey !== "null" && audioKey !== "undefined" && audioKey.trim() !== "") {
-      console.log(`[VideoGen] Getting signed URL for audio key: "${audioKey}"`);
-      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audioKey });
-      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
-      comfyAudioName = await uploadInputAudio(audioSignedUrl, `${jobId}_tts.wav`, usedApiKey);
-    } else {
-      console.log(`[VideoGen] No valid audio key provided. Skipping audio upload.`);
-    }
+    // 1. Predict filenames
+    const comfyAudioName = (audioKey && typeof audioKey === "string" && audioKey !== "null" && audioKey !== "undefined" && audioKey.trim() !== "")
+      ? `${jobId}_tts.wav`
+      : null;
 
-    // 2. Upload image to ComfyUI Cloud (ComfyUI prefers filenames of uploaded files)
-    const comfyImageName = await uploadInputImage(imageResultUrl, `${jobId}_flux.png`, usedApiKey);
+    const comfyImageName = `${jobId}_flux.png`;
 
-    // 3. Load Video Workflow JSON
     const ig = llmResponse.image_generation || {};
     const useProductThreeFrame =
       request_type === "PRODUCT" &&
@@ -76,52 +69,31 @@ async function generateComfyUIVideo(params) {
     const workflowPath = path.join(__dirname, "..", "workflow", workflowFile);
     const videoWorkflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
 
-    // 4. Populate Workflow Nodes
-    
-    // Node 440: first_frame (reveal_start / talent / single image)
+    const comfyHeroName = useProductThreeFrame ? `${jobId}_hero_frame.png` : null;
+    const comfyTransitionName = useProductThreeFrame ? `${jobId}_transition_frame.png` : null;
+    const comfyProductName = useUgcTwoFrame ? `${jobId}_product_frame.png` : null;
+
+    // 2. Populate Workflow Nodes
     if (videoWorkflow["440"]) videoWorkflow["440"].inputs.image = comfyImageName;
 
     if (useProductThreeFrame && videoWorkflow["441"] && videoWorkflow["442"]) {
-      const comfyHeroName = await uploadInputImage(
-        productFrameUrl,
-        `${jobId}_hero_frame.png`,
-        usedApiKey
-      );
-      const comfyTransitionName = await uploadInputImage(
-        transitionFrameUrl,
-        `${jobId}_transition_frame.png`,
-        usedApiKey
-      );
       videoWorkflow["441"].inputs.image = comfyHeroName;
       videoWorkflow["442"].inputs.image = comfyTransitionName;
-      console.log(
-        `[VideoGen] 3-frame PRODUCT: 440=${comfyImageName}, 442=${comfyTransitionName}, 441=${comfyHeroName}`
-      );
     } else if (useUgcTwoFrame && videoWorkflow["441"]) {
-      const comfyProductName = await uploadInputImage(
-        productFrameUrl,
-        `${jobId}_product_frame.png`,
-        usedApiKey
-      );
       videoWorkflow["441"].inputs.image = comfyProductName;
-      console.log(`[VideoGen] 2-frame UGC-P: 440=${comfyImageName}, 441=${comfyProductName}`);
     }
     
-    // Node 611: Load Audio
     if (videoWorkflow["611"] && comfyAudioName) {
       videoWorkflow["611"].inputs.audio = comfyAudioName;
     }
     
-    // Node 614: Prompt (Multimodal LTX prompt)
     if (videoWorkflow["614"]) {
       videoWorkflow["614"].inputs.value = llmResponse.ltx_prompt || params.prompt || "";
     }
     
-    // Node 478:286: Noise Seed
     const randomSeed = Math.floor(Math.random() * 1000000000000000000);
     if (videoWorkflow["478:286"]) videoWorkflow["478:286"].inputs.noise_seed = randomSeed;
     
-    // Width & Height (Nodes 478:330 and 478:324)
     let w = 720, h = 1280; // default to 720p 9:16
     if (videoQuality === "1080p") {
       if (aspectRatio === "16:9") { w = 1920; h = 1080; }
@@ -135,8 +107,63 @@ async function generateComfyUIVideo(params) {
     if (videoWorkflow["478:330"]) videoWorkflow["478:330"].inputs.value = w;
     if (videoWorkflow["478:324"]) videoWorkflow["478:324"].inputs.value = h;
     
-    // Node 478:331: Duration (audio length + padding)
     if (videoWorkflow["478:331"]) videoWorkflow["478:331"].inputs.value = (parseFloat(audioDuration) || 10) + 0.5;
+
+    // 3. Try to pick ComfyUI API Key right before upload/submit
+    if (!usedApiKey) {
+      const { pickComfyApiKey, getComfyApiKeys, getRedis } = require("../services");
+      const apiKeysString = await getComfyApiKeys();
+      redis = getRedis();
+      usedApiKey = await pickComfyApiKey(apiKeysString, redis);
+    }
+
+    if (!usedApiKey) {
+      console.log(`[VideoGen] All ComfyUI API keys are busy. Concurrency limit reached.`);
+      const err = new Error("All ComfyUI API keys are busy (Concurrency Limit)");
+      err.statusCode = 420;
+      err.workflow = videoWorkflow;
+      throw err;
+    }
+
+    // 4. Upload assets to ComfyUI Cloud using picked key
+    // Upload Audio
+    if (comfyAudioName) {
+      console.log(`[VideoGen] Uploading TTS Audio to ComfyUI Cloud...`);
+      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audioKey });
+      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
+      const returnedAudioName = await uploadInputAudio(audioSignedUrl, comfyAudioName, usedApiKey);
+      if (videoWorkflow["611"] && videoWorkflow["611"].inputs) {
+        videoWorkflow["611"].inputs.audio = returnedAudioName;
+        console.log(`[VideoGen] Updated Node 611 input audio to: ${returnedAudioName}`);
+      }
+    }
+
+    // Upload main image
+    console.log(`[VideoGen] Uploading main image to ComfyUI Cloud...`);
+    const returnedMainImageName = await uploadInputImage(imageResultUrl, comfyImageName, usedApiKey);
+    if (videoWorkflow["440"] && videoWorkflow["440"].inputs) {
+      videoWorkflow["440"].inputs.image = returnedMainImageName;
+      console.log(`[VideoGen] Updated Node 440 input image to: ${returnedMainImageName}`);
+    }
+
+    // Upload other keyframes
+    if (useProductThreeFrame) {
+      console.log(`[VideoGen] Uploading hero/transition frames to ComfyUI Cloud...`);
+      const returnedHeroName = await uploadInputImage(productFrameUrl, comfyHeroName, usedApiKey);
+      const returnedTransitionName = await uploadInputImage(transitionFrameUrl, comfyTransitionName, usedApiKey);
+      if (videoWorkflow["441"] && videoWorkflow["441"].inputs) {
+        videoWorkflow["441"].inputs.image = returnedHeroName;
+      }
+      if (videoWorkflow["442"] && videoWorkflow["442"].inputs) {
+        videoWorkflow["442"].inputs.image = returnedTransitionName;
+      }
+    } else if (useUgcTwoFrame) {
+      console.log(`[VideoGen] Uploading product frame to ComfyUI Cloud...`);
+      const returnedProductName = await uploadInputImage(productFrameUrl, comfyProductName, usedApiKey);
+      if (videoWorkflow["441"] && videoWorkflow["441"].inputs) {
+        videoWorkflow["441"].inputs.image = returnedProductName;
+      }
+    }
 
     // 5. Submit Video Job to ComfyUI Cloud
     const videoPromptId = await submitWorkflow(videoWorkflow, usedApiKey);
@@ -160,6 +187,15 @@ async function generateComfyUIVideo(params) {
 
   } catch (err) {
     console.error(`[VideoGen] Error triggering video for job ${jobId}:`, err);
+    if (usedApiKey && redis) {
+      try {
+        const redisKey = `comfyui_job_${usedApiKey}`;
+        await redis.decr(redisKey);
+        console.log(`[VideoGen] [Redis] Decremented ${redisKey} due to video gen failure`);
+      } catch (rErr) {
+        console.error("[VideoGen] [Redis] Error decrementing:", rErr.message);
+      }
+    }
     throw err;
   }
 }

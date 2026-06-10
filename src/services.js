@@ -447,12 +447,14 @@ const COMFY_BASE_URL = "https://cloud.comfy.org";
 
 const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputImage");
+  console.log(`[services:uploadInputImage] Downloading image from: ${imageUrl.slice(0, 120)}${imageUrl.length > 120 ? '...' : ''}`);
   const imageRes = await fetch(imageUrl);
   if (!imageRes.ok) throw new Error(`Gagal download input image: ${imageRes.status}`);
   const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
+  console.log(`[services:uploadInputImage] Downloaded image, size: ${imageBuffer.length} bytes. Uploading to comfy.org as "${filename}"...`);
 
   const formData = new FormData();
-  formData.append("image", new Blob([imageBuffer]), filename);
+  formData.append("image", new Blob([imageBuffer], { type: "image/png" }), filename);
   formData.append("overwrite", "true");
 
   const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
@@ -461,23 +463,29 @@ const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) 
     body: formData,
   });
 
+  console.log(`[services:uploadInputImage] Upload response status: ${uploadRes.status}`);
+
   if (!uploadRes.ok) {
     const text = await uploadRes.text();
+    console.error(`[services:uploadInputImage] Upload failed: ${text}`);
     throw new Error(`ComfyUI image upload failed: ${text}`);
   }
   const data = await uploadRes.json();
+  console.log(`[services:uploadInputImage] Upload success. Response:`, JSON.stringify(data));
   return data.name;
 };
 
 const uploadInputAudio = async (audioUrl, filename = "input_audio.wav", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputAudio");
+  console.log(`[services:uploadInputAudio] Downloading audio from: ${audioUrl.slice(0, 120)}${audioUrl.length > 120 ? '...' : ''}`);
   const audioRes = await fetch(audioUrl);
   if (!audioRes.ok) throw new Error(`Gagal download input audio: ${audioRes.status}`);
   const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+  console.log(`[services:uploadInputAudio] Downloaded audio, size: ${audioBuffer.length} bytes. Uploading to comfy.org as "${filename}"...`);
 
   const formData = new FormData();
   // ComfyUI Cloud uses the same endpoint and "image" field for all input files
-  formData.append("image", new Blob([audioBuffer]), filename);
+  formData.append("image", new Blob([audioBuffer], { type: "audio/wav" }), filename);
   formData.append("overwrite", "true");
 
   const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
@@ -486,16 +494,31 @@ const uploadInputAudio = async (audioUrl, filename = "input_audio.wav", apiKey) 
     body: formData,
   });
 
+  console.log(`[services:uploadInputAudio] Upload response status: ${uploadRes.status}`);
+
   if (!uploadRes.ok) {
     const text = await uploadRes.text();
+    console.error(`[services:uploadInputAudio] Upload failed: ${text}`);
     throw new Error(`ComfyUI audio upload failed: ${text}`);
   }
   const data = await uploadRes.json();
+  console.log(`[services:uploadInputAudio] Upload success. Response:`, JSON.stringify(data));
   return data.name;
 };
 
 const submitWorkflow = async (workflow, apiKey) => {
   if (!apiKey) throw new Error("API Key is required for submitWorkflow");
+
+  // --- MOCK HTTP 420 SIMULATION FOR TESTING ---
+  // Uncomment the lines below to simulate comfy.org returning HTTP 420 concurrency limit:
+  /*
+  const err = new Error("ComfyUI submit failed: concurrency limit exceeded (Simulated 420)");
+  err.statusCode = 420;
+  err.workflow = workflow;
+  throw err;
+  */
+  // --------------------------------------------
+
   const res = await fetch(`${COMFY_BASE_URL}/api/prompt`, {
     method: "POST",
     headers: {
@@ -507,7 +530,10 @@ const submitWorkflow = async (workflow, apiKey) => {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`ComfyUI submit failed: ${text}`);
+    const err = new Error(`ComfyUI submit failed: ${text}`);
+    err.statusCode = res.status;
+    err.workflow = workflow;
+    throw err;
   }
   const data = await res.json();
   return data.prompt_id;

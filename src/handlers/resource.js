@@ -60,7 +60,7 @@ exports.handlePostResource = async (event) => {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
-    } catch (e) {}
+    } catch (e) { }
     if (parsedAttr) {
       const qNum = videoQuality.replace("p", "");
       const attrKey = `${qNum}`;
@@ -104,19 +104,21 @@ exports.handlePostResource = async (event) => {
       await docClient.send(new TransactWriteCommand({
         TransactItems: [
           { Put: { TableName: USER_REQUEST_TABLE_NAME, Item: putItem } },
-          { Update: {
-            TableName: PROFILE_TABLE_NAME,
-            Key: { user_id: String(userId), user_type: "CUSTOMER" },
-            UpdateExpression:
-              requestType === "FREE-TRIAL"
-                ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
-            ConditionExpression:
-              requestType === "FREE-TRIAL"
-                ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
-                : "attribute_exists(user_id) AND credit_balance >= :c",
-            ExpressionAttributeValues: expressionAttributeValues,
-          }},
+          {
+            Update: {
+              TableName: PROFILE_TABLE_NAME,
+              Key: { user_id: String(userId), user_type: "CUSTOMER" },
+              UpdateExpression:
+                requestType === "FREE-TRIAL"
+                  ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
+                  : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
+              ConditionExpression:
+                requestType === "FREE-TRIAL"
+                  ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
+                  : "attribute_exists(user_id) AND credit_balance >= :c",
+              ExpressionAttributeValues: expressionAttributeValues,
+            }
+          },
         ],
       }));
       return null;
@@ -151,15 +153,15 @@ exports.handlePostResource = async (event) => {
       await uploadToS3(S3_RESOURCE_BUCKET, s3Key, parsed.buffer, parsed.contentType);
       s3Keys.push(s3Key);
       s3ImageUrls.push(await getSignedUrl(s3Client, new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key }), { expiresIn: 3600 }));
-    } catch (err) { 
+    } catch (err) {
       console.error("S3 upload error:", err);
-      return response(502, { error: `S3 upload failed: ${err.message}` }); 
+      return response(502, { error: `S3 upload failed: ${err.message}` });
     }
   }
 
   const putItem = {
     uuid: requestId, user_email: userEmail, user_id: userId, prompt, request_type: requestType,
-    resource_family: resourceFamily, status: "PENDING", credit_amount: finalAmount,
+    resource_family: resourceFamily, status: "SUBMITTING", credit_amount: finalAmount,
     created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
     ugc_mode: body.ugc_mode || null,
     store_type: body.store_type || null,

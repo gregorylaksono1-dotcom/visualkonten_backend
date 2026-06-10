@@ -121,6 +121,13 @@ Parameters:
     Default: 8
     MinValue: 1
     MaxValue: 60
+  Runpod:
+    Type: String
+    Description: 'true = enable Runpod S3 upload; false = regular workflow'
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -714,6 +721,8 @@ Resources:
             Ref: UpstashRedisRestUrl
           UPSTASH_REDIS_REST_TOKEN:
             Ref: UpstashRedisRestToken
+          RUNPOD:
+            Ref: Runpod
     Metadata:
       SamResourceId: FreeTrialWorkerFunction
   ComfyUIWorkerFunction:
@@ -766,6 +775,8 @@ Resources:
             Ref: ComfyMaxConcurrentJobs
           USE_PROMPT_REFACTOR:
             Ref: UsePromptRefactor
+          RUNPOD:
+            Ref: Runpod
       Events:
         ComfyUIPollSchedule:
           Type: Schedule
@@ -848,12 +859,14 @@ Resources:
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
           VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
           CONFIG_SSM_PATH: !Ref ConfigSsmPath
+          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
       Events:
-        HourlyCronEvent:
+        TwoMinuteCronEvent:
           Type: Schedule
           Properties:
-            Schedule: rate(1 hour)
-            Description: Recover stalled jobs that are older than 1 hour
+            Schedule: rate(2 minutes)
+            Description: Recover stalled jobs and retry concurrency failures
             Enabled: true
     Metadata:
       SamResourceId: RecoveryCronFunction

@@ -30,6 +30,26 @@ const DELIVERS_THEN_SPEAKS_RE =
 const TALENT_STARTS_WITH_RE =
   /\bThe talent\s+starts?\s+with\s+[^.]+?\s+and\s+speaks\b/gi;
 
+/** Verbose eye-contact fluff before speaks — testing shows this kills lip sync. */
+const VERBOSE_EYE_CONTACT_SPEAKS_RES = [
+  [
+    /\bThe talent\s+looks?\s+directly\s+into\s+the\s+camera\s+with\s+direct\s+eye\s+contact,?\s*eyes\s+locked\s+on\s+(?:the\s+)?lens\s+and\s+speaks\b/gi,
+    "The talent looks directly into the camera and speaks",
+  ],
+  [
+    /\blooks?\s+directly\s+into\s+the\s+camera\s+with\s+direct\s+eye\s+contact,?\s*eyes\s+locked\s+on\s+(?:the\s+)?lens\s+and\s+speaks\b/gi,
+    "looks directly into the camera and speaks",
+  ],
+  [
+    /\bdirect\s+eye\s+contact\s+with\s+the\s+camera,?\s*eyes\s+locked\s+on\s+(?:the\s+)?lens\s+and\s+speaks\b/gi,
+    "looks directly into the camera and speaks",
+  ],
+  [
+    /\bwith\s+direct\s+eye\s+contact,?\s*eyes\s+locked\s+on\s+(?:the\s+)?lens\s+and\s+speaks\b/gi,
+    "and speaks",
+  ],
+];
+
 const PRE_SPEECH_SMILE_RE =
   /(?:,\s*)?starts?\s+with\s+(?:a\s+)?(?:(?:playful|amused|friendly|cheeky)\s+)*(?:(?:\w+)\s+){0,4}smile\s+and\s+/gi;
 
@@ -178,16 +198,30 @@ function stripSpeechForNonTalkvid(prompt) {
     .trim();
 }
 
+function simplifyEyeContactBeforeSpeaks(prompt) {
+  let out = String(prompt || "");
+  for (const [re, replacement] of VERBOSE_EYE_CONTACT_SPEAKS_RES) {
+    out = out.replace(re, replacement);
+  }
+  return out
+    .replace(/\bThe talent\s+The talent\b/gi, "The talent")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.])/g, "$1")
+    .trim();
+}
+
 function normalizeExplicitSpeech(prompt, talkvid) {
   if (!talkvid) return stripSpeechForNonTalkvid(prompt);
 
-  return stripPreSpeechSetup(prompt)
-    .replace(FIGURATIVE_SPEECH_RE, "speaks ")
-    .replace(WHILE_SPEAKING_RE, "")
-    .replace(DELIVERS_THEN_SPEAKS_RE, "speaks ")
-    .replace(/\bspeaks?\s+to\s+the\s+camera\s+/gi, "speaks ")
-    .replace(/\bspeaks?\s{2,}/gi, "speaks ")
-    .trim();
+  return simplifyEyeContactBeforeSpeaks(
+    stripPreSpeechSetup(prompt)
+      .replace(FIGURATIVE_SPEECH_RE, "speaks ")
+      .replace(WHILE_SPEAKING_RE, "")
+      .replace(DELIVERS_THEN_SPEAKS_RE, "speaks ")
+      .replace(/\bspeaks?\s+to\s+the\s+camera\s+/gi, "speaks ")
+      .replace(/\bspeaks?\s{2,}/gi, "speaks ")
+      .trim()
+  );
 }
 
 function collectSceneNegatives(scene) {
@@ -263,6 +297,7 @@ module.exports = {
   extractNegativeClauses,
   normalizeExplicitSpeech,
   stripPreSpeechSetup,
+  simplifyEyeContactBeforeSpeaks,
   stripSpeechForNonTalkvid,
   isTalkvidScene,
 };

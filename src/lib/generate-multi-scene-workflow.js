@@ -13,6 +13,7 @@ const WORKFLOW_NODE_IDS = {
   duration: (i) => 2300 + i,
   subgraph: (i) => 2400 + i,
   merge: (j) => 2500 + j,
+  S3_UPLOAD: 9900,
 };
 
 const RESOLUTION_PRESETS = {
@@ -539,7 +540,7 @@ function buildMultiSceneWorkflow(scenes, options = {}) {
     }
   }
 
-  nodes.push({
+  const vhsCombineNode = {
     id: NODE.VHS_COMBINE,
     type: "VHS_VideoCombine",
     pos: [XVC, YB + Math.floor(N / 2) * YS],
@@ -568,7 +569,43 @@ function buildMultiSceneWorkflow(scenes, options = {}) {
       save_output: true,
       videopreview: { hidden: false, paused: false, params: {} },
     },
-  });
+  };
+
+  if (options.runpod) {
+    const lkS3Upload = nextLink++;
+    vhsCombineNode.outputs[0].links = [lkS3Upload];
+    nodes.push(vhsCombineNode);
+
+    nodes.push({
+      id: NODE.S3_UPLOAD,
+      type: "SaveVideoFilesS3",
+      pos: [XVC + 550, YB + Math.floor(N / 2) * YS],
+      size: [300, 150],
+      flags: {},
+      order: 100,
+      mode: 0,
+      inputs: [
+        { name: "filenames", type: "VHS_FILENAMES", link: lkS3Upload }
+      ],
+      outputs: [],
+      title: "Upload Video to S3",
+      properties: { "Node name for S&R": "SaveVideoFilesS3" },
+      widgets_values: [
+        options.s3FilenamePrefix || "VideoFiles"
+      ]
+    });
+
+    links_.push({
+      id: lkS3Upload,
+      origin_id: NODE.VHS_COMBINE,
+      origin_slot: 0,
+      target_id: NODE.S3_UPLOAD,
+      target_slot: 0,
+      type: "VHS_FILENAMES"
+    });
+  } else {
+    nodes.push(vhsCombineNode);
+  }
   links_.push({
     id: LK_PAD_TO_VHS,
     origin_id: NODE.AUDIO_PAD,

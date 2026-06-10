@@ -45,6 +45,17 @@ Real smartphone capture, handheld framing, natural skin texture, slightly imperf
 ```
 *(Scene 3 tanpa talent: hilangkan `natural skin texture`; sisanya tetap.)*
 
+**`{POS_SKIN}`** — afirmatif anti-AI/anti-tabloid (pengganti positif dari `{NEG_STUDIO}` untuk engine tanpa negative; sisipkan di blok `SCENE` & `talent_identity.prompt` saat ada wajah):
+```text
+natural uneven skin texture with visible pores and subtle skin imperfections, realistic non-retouched complexion, soft everyday lighting, ordinary believable person, authentic documentary realism
+```
+*(Scene 3 tanpa talent: skip.)*
+
+**`{REAL_CAM}`** — spek kamera realistis (sisipkan sekali per `SCENE`, sebelum `{TAIL_PHONE}`):
+```text
+shot on a phone camera, 28mm-equivalent lens look, natural available light, gentle shallow depth of field, faint sensor grain
+```
+
 **`{PHRASE_BODY}`** — pose wearable full body (scene 2 reveal):
 ```text
 ideal well-proportioned physique, compelling confident pose, flattering silhouette
@@ -66,11 +77,16 @@ naturally attractive, photogenic face, pleasant appealing features, charismatic 
 plain face, unattractive, awkward unflattering look, dull boring expression, unphotogenic, asymmetrical unflattering face, tired sickly look
 ```
 
+**`{NEG_GAZE}`** — anti mata lepas dari kamera (dipakai di `ltx_negative_prompt`, `negative_prompt`, dan `avoid` scene 1 — ganti string gaze manual):
+```text
+looking away from camera, eyes averted, looking down, side glance, off-camera gaze
+```
+
 **`{SPEAKS}`** — **satu-satunya** pola lip sync scene 1 (talking_head) — wajib **persis** ini:
 ```text
 The talent looks directly into the camera and speaks "[lip_sync_segment verbatim]" with clear lip movement fully in sync with the spoken line
 ```
-**Struktur `ltx_prompt` scene 1:** maks **1 kalimat** tone + framing → **langsung** `{SPEAKS}` → ekspresi/gerak **setelah** kutipan. **Dilarang** deskripsi panjang pose/ekspresi/produk **sebelum** `The talent looks directly into the camera and speaks`. **Dilarang** variasi lain (`The talent speaks`, `eyes locked on lens`, `direct eye contact` sebelum `speaks`).
+**Struktur `ltx_prompt` scene 1 — WAJIB SIMPEL (anti gagal lip sync):** kalimat kompleks bersaing dengan `speaks` dan sering mematikan lip sync. Format dikunci: `[OPENER pendek] → {SPEAKS} → (opsional 1 fragmen penutup)`. **Total ≤ ~30 kata.** Framing, ekspresi, mood skeptis, dan gesture **dari first frame image**, **bukan** ditulis di `ltx_prompt` scene 1. **Dilarang:** kalimat majemuk, deskripsi pose/ekspresi/produk/gesture, kata sambung (`then`/`while`/`as`), `The talent speaks` tanpa `looks directly into the camera`, `eyes locked on lens`/`direct eye contact` sebelum `speaks`, apa pun setelah kutipan selain 1 fragmen penutup ≤4 kata. Detail pola lip sync: lihat "Aturan lip sync / `talking_head`".
 
 ---
 
@@ -79,7 +95,7 @@ The talent looks directly into the camera and speaks "[lip_sync_segment verbatim
 | Field | Sumber |
 |-------|--------|
 | `product_description` | User |
-| `talent_image` | Foto model/talent (1 file) |
+| `talent_image` | Foto model/talent (1 file) — **idealnya outfit netral, bukan produk** (agar scene 1 netral & scene 2 apply produk bersih) |
 | `product_images` | Foto produk, **maks 2 file** (utama + opsional sudut/detail) |
 | `aspect_ratio` | `9:16`, `16:9`, `1:1`, dll. — **hanya** param API image, **bukan** `image_prompt` |
 | `voice_selection_mode` | Opsional: `llm_cast` (default) \| `random` \| `user_pick` |
@@ -95,9 +111,9 @@ The talent looks directly into the camera and speaks "[lip_sync_segment verbatim
 | `video_type` | UGC Native + Product Showcase | | `audio_delivery_mode` | `hybrid` |
 | `duration_seconds` | 20 | | `language` | id |
 | `platform` | TikTok | | `cta_spoken` | klik keranjang kuning |
-| `scene_count` | 3 | | `continuity_mode` | reference_only |
+| `scene_count` | 3 | | `continuity_mode` | chained |
 
-**Pipeline:** OpenAI `images/edits` (first frame) → LTX I2V per scene → ComfyUI **stitch** ke 20 dtk.
+**Pipeline:** fal Seedream V4.5 edit (first frame; alt FLUX.2 [pro]) → LTX I2V per scene → ComfyUI **stitch** ke 20 dtk.
 
 - image 1 = talent, image 2 = produk utama, image 3 (opsional) = produk kedua — scene 3: **produk saja** (1–2 gambar)
 - Aspect ratio & resolusi = param API (`meta.aspect_ratio` → `size`), **jangan** di `image_prompt`
@@ -318,7 +334,7 @@ small faceless child-sized mannequin wearing or displaying the exact children's 
 ## Framing per scene
 
 ### Talking head (scene 1 hook/context)
-`medium close-up, chest-up` (1 kalimat framing). Lalu **langsung** `{SPEAKS}` — wajib dimulai `The talent looks directly into the camera and speaks "…"`. Kutip **verbatim**. Larangan: paragraf panjang sebelum `speaks`, `direct eye contact` / `eyes locked on lens`, paraphrase (`asking about`, `speaking about`).
+Framing `medium close-up, chest-up` ada **di first frame image saja** — **bukan** di `ltx_prompt` scene 1. Aturan lip sync & format `ltx_prompt` scene 1: lihat **"Aturan lip sync / `talking_head`"** (canonical).
 
 ### Scene 2 reveal (wearable)
 `full body wearing pose, {PHRASE_BODY}, complete outfit visible, confident styling movement, not speaking to camera`. Shot full/three-quarter, garment terbaca kepala–kaki, posture tegak confident. Kamera **static** (biar tubuh bergerak). Larangan: extreme wide, bicara ke kamera, holding garment, slouchy/awkward, candid snapshot, runway/spin.
@@ -338,64 +354,111 @@ Target pasar Indonesia → talent **wajib** terlihat orang Indonesia.
 | Field | Aturan |
 |-------|--------|
 | `ethnicity` | Default `"Indonesian"` — eksplisit di setiap response |
-| `talent_identity.prompt` | Wajib `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** + `warm brown skin typical of Indonesian people`, `real smartphone UGC`, `natural skin texture` — talent **harus menarik** tapi **bukan** studio glamour/model pro. Wearable scene 2: tambah `{PHRASE_BODY}` |
+| `talent_identity.prompt` | Wajib `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** + **`{POS_SKIN}`** + `warm brown skin typical of Indonesian people`, `real smartphone UGC` — talent **harus menarik** tapi **bukan** studio glamour/model pro. Wearable scene 2: tambah `{PHRASE_BODY}` |
 | `image_negative_avoid` | Wajib = `{NEG_STUDIO}` (dipakai backend saat generate portrait talent step 1) |
 | `outfit_lock` | Wearable: deskripsi **garment produk**. Kids: pakaian dewasa netral scene 1 |
 | `product_identity.prompt` | Warna, bahan, potongan, pattern |
 
-**Contoh `talent_identity.prompt` (wanita, hijab):** *Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin, natural Indonesian appearance, naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look, soft dark brown hair under a simple neutral hijab, plain cream ribbed top, chest-up portrait, soft natural window daylight, real smartphone UGC photo, natural skin texture, authentic not glamour.*
+**Contoh `talent_identity.prompt` (wanita, hijab — Seedream/FLUX text-to-image):** *Indonesian woman in her mid-twenties, Southeast Asian facial features, warm brown skin typical of Indonesian people, natural Indonesian appearance, naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look, soft dark brown hair under a simple neutral hijab, plain cream ribbed top, relaxed chest-up portrait, soft natural window daylight with a warm fill, natural uneven skin texture with visible pores and subtle imperfections, realistic non-retouched complexion, lived-in home background with shallow depth of field, shot on a phone camera with faint sensor grain, authentic documentary realism, ordinary believable person, not glamour, not studio, not a professional model.*
 
-Backend step 1: portrait talent digenerate dari `talent_identity.prompt`; jika tidak menyebut etnis Indonesia, model drift ke wajah non-Indonesia.
+**Contoh (pria, daily wear):** *Indonesian man in his late twenties, Southeast Asian facial features, warm brown skin typical of Indonesian people, natural Indonesian appearance, naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look, short neat black hair, plain neutral t-shirt, relaxed chest-up portrait, soft natural window daylight, natural uneven skin texture with visible pores, realistic non-retouched complexion, lived-in home background with shallow depth of field, shot on a phone camera with faint sensor grain, authentic documentary realism, ordinary believable person, not glamour, not studio, not a professional model.*
+
+Backend step 1: portrait talent digenerate dari `talent_identity.prompt` via `fal-ai/bytedance/seedream/v4.5/text-to-image`; jika tidak menyebut etnis Indonesia, model drift ke wajah non-Indonesia. `image_negative_avoid` = `{NEG_STUDIO}` tetap diisi sebagai **metadata QA / fallback gpt-image-2** (tidak dikirim ke Seedream/FLUX).
 
 ---
 
 ## Image generation (`meta.image_generation`)
 
-| `use_model_reference` | `use_product_reference` | `product_image_count` | `image[]` |
-|----------------------|---------------------------|----------------------|-----------|
-| `true` | `true` | `1` | `[talent, product_0]` — scene 1–2 default |
-| `true` | `true` | `2` | `[talent, product_0, product_1]` |
-| `false` | `true` | `1` | `[product_0]` — **wajib scene 3** |
-| `false` | `true` | `2` | `[product_0, product_1]` — scene 3, 2 sudut |
+**Engine: fal Seedream V4.5 edit** (primary; alt FLUX.2 [pro]; fallback gpt-image-2). Perilaku beda dari OpenAI:
 
-**Default scene 1–2:** model + product true. **Scene 3:** model false, product true. *(Definisi field lengkap ada di schema JSON — lihat blok `meta.image_generation` di bawah.)*
+| Hal | Seedream V4.5 / FLUX.2 |
+|-----|------------------------|
+| Negative prompt | **TIDAK ADA** knob negatif yang andal → semua larangan jadi **frasa afirmatif** di prompt positif (`{PHRASE_ID}`+`{PHRASE_APPEAL}`+`{POS_SKIN}`+`{TAIL_PHONE}`). `negative_prompt` di JSON = metadata QA / fallback gpt-image-2 saja, **tidak dikirim** |
+| Rujuk reference | **Seedream:** `Figure 1/2/3` di prompt · **FLUX.2:** "the first/second/third reference image" |
+| Jumlah reference | Seedream s/d 10 · FLUX.2 s/d 9 |
+| Ukuran | Seedream **1920–4096 px/axis** (min 1920) → `image_size {width,height}`. 9:16→2160×3840, 1:1→2560×2560, 16:9→3840×2160. **Jangan** di prompt |
+| Seed/guidance/steps | dikelola internal — jangan kirim |
+
+| `use_model_reference` | `use_product_reference` | `product_image_count` | `image_urls[]` (Seedream Figure order) |
+|----------------------|---------------------------|----------------------|-----------|
+| `true` | `true` | `1` | `[talent=F1, product_0=F2]` — scene 1–2 default |
+| `true` | `true` | `2` | `[talent=F1, product_0=F2, product_1=F3]` |
+| `false` | `true` | `1` | `[product_0=F1]` — **wajib scene 3** |
+| `false` | `true` | `2` | `[product_0=F1, product_1=F2]` — scene 3, 2 sudut |
+
+**Default scene 1–2:** model + product true. **Scene 3:** model false, product true.
+
+### Konsistensi antar-scene — continuity chaining (WAJIB untuk konsistensi wajah & baju)
+
+Generate tiap scene **independen** dari talent-ref yang sama (`reference_only`) tetap bisa drift wajah/pose. Untuk lock identitas + outfit lintas scene, pakai **`continuity_mode: chained`**: scene berikutnya memakai **output scene sebelumnya** sebagai anchor identitas (Figure 1), bukan foto talent asli.
+
+| `continuity_mode` | Perilaku | Kapan |
+|-------------------|----------|-------|
+| `chained` ✅ **default disarankan** | Scene N>1 melampirkan **output scene anchor** sebagai Figure 1 (identitas + outfit terbawa persis), produk tetap Figure 2 | Konsistensi maksimal; generate **berurutan** scene 1→2→3 |
+| `reference_only` | Tiap scene re-attach talent + produk **asli** | Lebih cepat (paralel), tapi rawan drift |
+
+**`continuity_image_from`** = `scene_id` sumber anchor (atau `null`). Backend mengambil **output frame** scene itu dan memakainya sebagai Figure 1 menggantikan talent asli.
+
+Rantai default (`chained`):
+- **Scene 1** — `continuity_image_from: null` (ANCHOR). `image_urls = [talent=F1, product=F2]`. Output scene 1 = wajah & styling kanonik.
+- **Scene 2** — `continuity_image_from: 1`. `image_urls = [output_scene_1=F1, product=F2]`. Wajah/hijab dari scene 1 + apply produk dari F2.
+- **Scene 3** — produk saja, `continuity_image_from: null`, `image_urls = [product=F1]`. (Opsional `continuity_image_from: 2` jika ingin drape garment hasil scene 2 yang terbawa — tapi default pakai foto produk asli agar warna/bentuk paling akurat.)
+
+**Gating backend (chained):** generate **sekuensial** (tidak paralel) — scene 2 menunggu output scene 1 ada. Jika output anchor belum ada → fallback `reference_only` untuk scene itu + log warning.
+
+**`REFERENCE IMAGES` scene 2 saat `chained` (F1 = output scene 1):** ganti kalimat talent jadi —
+```text
+REFERENCE IMAGES: Figure 1 is the previous frame of the SAME talent — keep the identical face, hijab/hair, skin tone, and body exactly as in Figure 1. Figure 2 is the product reference — keep its exact shape, color, and labels. Apply the product from Figure 2 as the complete outfit worn on the talent's body with exact color and fit, natural drape. Do not show the garment held in hands. Output one single continuous photograph only, not a panel, grid, or collage.
+```
+
+> Catatan: `chained` hanya berlaku di model **edit/reference** (Seedream V4.5 edit / FLUX.2 pro / Nano Banana). **Tidak** berfungsi di text-to-image murni (mis. FLUX schnell) yang tidak membaca gambar input sama sekali.
 
 ### Isi `image_prompt` (first frame per scene)
 
-Bahasa **Inggris**. Struktur wajib dua bagian: `REFERENCE IMAGES` → `SCENE`. **Jangan** sebut `9:16`/`vertical`/`1024x1536`/resolusi.
+Bahasa **Inggris**. Struktur wajib dua bagian: `REFERENCE IMAGES` → `SCENE`. **Jangan** sebut `9:16`/`vertical`/resolusi/ukuran.
 
-Setiap `SCENE` wajib mengarah ke foto hasil kamera HP. Wajib sertakan **`{PHRASE_APPEAL}`** (jika ada wajah/talent) + `{TAIL_PHONE}` di blok `SCENE`. Scene 2 reveal wearable: tambah `{PHRASE_BODY}`. **Dilarang:** `candid`, `casual snapshot`, `relaxed slouchy try-on` (terutama full body). `negative_prompt` semua scene wajib memuat `{NEG_STUDIO}`; scene 1–2 tambah `{NEG_ETHNIC}` + `{NEG_UNATTRACTIVE}`.
+Setiap `SCENE` (jika ada wajah) wajib memuat `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** + `{POS_SKIN}` + `{REAL_CAM}` + `{TAIL_PHONE}`. Scene 2 reveal wearable: tambah `{PHRASE_BODY}`. **Dilarang:** `candid`, `casual snapshot`, `relaxed slouchy try-on`. `negative_prompt` / `image_negative_avoid` diisi `{NEG_STUDIO}` (+ scene 1–2: `{NEG_ETHNIC}`, `{NEG_UNATTRACTIVE}`, `{NEG_GAZE}`) **hanya sebagai metadata QA / fallback gpt-image-2**.
 
-**`REFERENCE IMAGES` — talent + produk (`product_image_count: 1`):**
+**`REFERENCE IMAGES` — Seedream, talent + produk (`product_image_count: 1`):**
 ```text
-REFERENCE IMAGES: The first attached image is the talent (model) reference — keep the same Indonesian face, ethnicity, hair, skin tone, and outfit. The second attached image is the product reference — keep the exact product shape, color, packaging, and labels. Do not swap or mix references. Output one single continuous photograph only — not a panel, grid, or collage.
+REFERENCE IMAGES: Figure 1 is the talent reference — keep the same Indonesian face, ethnicity, hair, skin tone, and natural appearance exactly. Figure 2 is the product reference — keep its exact shape, color, packaging, and labels. Do not swap or mix the two references. Output one single continuous photograph only, not a panel, grid, or collage.
 ```
-**(`product_image_count: 2`):** tambah kalimat ketiga — `The third attached image is the secondary product reference — use for additional angles, back view, detail texture, or print close-up; both product images depict the same product.`
+**(`product_image_count: 2`):** tambah — `Figure 3 is the secondary product reference for additional angle, back view, or print detail; Figure 2 and Figure 3 are the same product.`
 
-**Wearable scene 2 (apply garment):** tambah pada blok produk — `apply it as the complete outfit worn on the talent's body with exact color, pattern, and fit; natural drape. Do not show garments held in hands.`
+**Wearable scene 2 (apply garment):** tambah pada blok produk — `Apply the product from Figure 2 as the complete outfit worn on the talent's body with exact color, pattern, and fit, natural drape. Do not show the garment held in hands.`
 
-**Wearable_kids scene 2–3 (mannequin):** ganti talent dengan — `apply the exact product onto a small faceless child mannequin with accurate color, print, and fit. Do not add any real person, adult, child face, or hands.`
+**Wearable_kids scene 2–3 (mannequin):** ganti talent — `Apply the exact product from Figure 1 onto a small faceless child-sized mannequin with accurate color, print, and fit. Do not add any real person, adult, child face, or hands.`
 
 **`REFERENCE IMAGES` — scene 3 (produk saja, count 1):**
 ```text
-REFERENCE IMAGES: The first attached image is the product reference — keep the exact product shape, color, packaging, and labels identical. Do not add a person, hands, or face. Output one single continuous photograph only — not a panel, grid, or collage.
+REFERENCE IMAGES: Figure 1 is the product reference — keep its exact shape, color, packaging, and labels identical. Do not add a person, hands, or face. Output one single continuous photograph only, not a panel, grid, or collage.
 ```
-**(count 2):** tambah `The second attached image is the secondary product reference — use for back view, detail texture, or component confirmation; both depict the same product.`
+**(count 2):** tambah `Figure 2 is the secondary product reference for back view or detail; both figures are the same product.`
 
-**`SCENE` template umum:**
+> **FLUX.2 [pro]:** ganti "Figure 1/2/3" → "the first / second / third reference image". Sisa identik.
+
+**`SCENE` scene 1 — talking head (mid-speech, mata ke kamera):**
 ```text
-SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. [framing + pose + produk/talent per scene]. Indonesian talent with natural Southeast Asian features, warm brown skin. {PHRASE_APPEAL} {TAIL_PHONE} No on-screen text, signage, UI, watermark, or split layout.
+SCENE: One single full-frame photograph in [environment_lock] with soft natural daylight and a warm fill. Medium close-up, chest-up, of the Indonesian talent with natural Southeast Asian features and warm brown skin typical of Indonesian people, wearing a neutral everyday outfit (not the product), looking straight into the camera with a mid-speech expression — lips slightly parted, playful skeptical eyebrows. Naturally attractive photogenic face with pleasant appealing features, charismatic everyday creator look. Lived-in background with a wooden shelf and a small plant in soft shallow depth of field. natural uneven skin texture with visible pores and subtle skin imperfections, realistic non-retouched complexion, ordinary believable person, authentic documentary realism. shot on a phone camera, 28mm-equivalent lens look, natural available light, gentle shallow depth of field, faint sensor grain. Real smartphone capture, handheld framing, natural skin texture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No on-screen text, signage, UI, watermark, or split layout.
 ```
 
-**Scene 1 talking head — anti-AI-perfect (target realistis):** talent **wajib menarik** (`{PHRASE_APPEAL}`) — bukan plain/average. Outfit **netral harian** (bukan produk), ekspresi **mid-speech** (mulut sedikit terbuka, alis skeptis playful), kulit **natural texture**, background **lived-in** (rak kayu/tanaman, shallow DOF), **window daylight** + warm fill. `ltx_prompt` scene 1 wajib sertakan `{PHRASE_APPEAL}`. `negative_prompt` scene 1 tambah: `{NEG_UNATTRACTIVE}`, `fashion catalog, symmetrical influencer pose, big staged smile, waving at camera, empty gray wall, sterile minimalist room, glossy fabric, overly saturated, wearing product garment in scene 1, looking away from camera, eyes averted, looking down, side glance, off-camera gaze`.
-
-**`SCENE` scene 3 (object):**
+**`SCENE` scene 2 — reveal (wearable, full body):**
 ```text
-SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] standing or placed naturally on [product_hero_surface], product centered, slight 3/4 angle, clean background. No person, no hands, not flat lay top-down. No text, UI, or watermark.
+SCENE: One single full-frame photograph in [environment_lock], soft natural daylight. Full body shot of the Indonesian talent with natural Southeast Asian features and warm brown skin, wearing the exact outfit applied from the product reference, ideal well-proportioned physique, compelling confident pose, flattering silhouette, complete outfit visible from head to toe, standing tall with confident styling posture, not speaking to the camera. Naturally attractive photogenic face, pleasant appealing features, charismatic everyday creator look. natural uneven skin texture with visible pores, realistic non-retouched complexion, ordinary believable person, authentic documentary realism. shot on a phone camera, natural available light, faint sensor grain. Real smartphone capture, handheld framing, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No on-screen text, signage, UI, watermark, or split layout.
 ```
-**`SCENE` scene 3 (wearable):**
+
+**`SCENE` scene 2 — demo (detail kain / handheld):**
 ```text
-SCENE: One single full-frame photograph. [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] hanging at full length on a wooden hanger against a plain wall OR displayed on a faceless dress form mannequin torso, complete garment silhouette and drape visible, fabric color and texture clear. No person, no hands, not folded, not stacked, not worn on a real human body, not flat lay top-down. No text, UI, or watermark.
+SCENE: One single full-frame photograph in [environment_lock], soft natural daylight. Medium close-up of the outfit on the talent's body (or hands holding the product for handheld categories), one hand lightly touching the fabric/lid to show texture and detail, natural relaxed posture, not speaking to the camera. natural skin texture, realistic non-retouched complexion, authentic documentary realism. shot on a phone camera, natural available light, gentle shallow depth of field, faint sensor grain. Real smartphone capture, handheld framing, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No on-screen text, signage, UI, watermark, or split layout.
+```
+
+**`SCENE` scene 3 (object) — tanpa talent:**
+```text
+SCENE: One single full-frame photograph in [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] placed naturally on [product_hero_surface], product centered, slight 3/4 angle, clean uncluttered background. shot on a phone camera, natural available light, gentle shallow depth of field, faint sensor grain. Real smartphone capture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No person, no hands, not flat lay top-down. No on-screen text, signage, UI, watermark.
+```
+**`SCENE` scene 3 (wearable) — tanpa talent:**
+```text
+SCENE: One single full-frame photograph in [environment_lock], soft natural daylight. Semi close-up product hero: the [product_name] hanging at full length on a wooden hanger against a plain wall, or displayed on a faceless dress-form mannequin torso, complete garment silhouette and fabric drape visible, color and texture clear. shot on a phone camera, natural available light, faint sensor grain. Real smartphone capture, slightly imperfect composition. Not stock photography, not studio photography, not commercial campaign, not magazine style, not AI aesthetic. No person, no hands, not folded, not stacked, not worn on a real human body, not flat lay top-down. No on-screen text, signage, UI, watermark.
 ```
 
 ---
@@ -412,12 +475,18 @@ Generate caption TikTok, Shopee, Instagram. Conversion-focused, standalone persu
 
 ## `ltx_prompt` & `ltx_negative_prompt` (LTX I2V — `guide_ltx.md`)
 
-- Bahasa **Inggris**, **4–6 kalimat**, tone di depan, **satu arc aksi** + static / very slow push-in
+- Bahasa **Inggris**, tone di depan, **satu arc aksi** + static / very slow push-in
+- **Scene 1 = SIMPEL** (lihat "Aturan lip sync"): lip sync rapuh, kalimat minimal. **Scene 2–3 = ISI PENUH** (4–6 kalimat).
+- **Anti-filler scene 2–3 (WAJIB):** klip 6–7s yang **kurang dideskripsikan** bikin LTX mengisi "waktu kosong" dengan halusinasi — karakter kartun/mascot, orang tambahan, background cafe/restoran, ganti scene. Cegah dengan: **(a)** rantai **3 beat gerak kontinu** yang mengisi penuh durasi — selalu ada sesuatu bergerak pelan dari frame pertama sampai terakhir, **tanpa jeda statis**; **(b)** **kunci environment** eksplisit (`in the same [environment_lock], the background held steady throughout`); **(c)** subjek/produk **selalu in frame** (`always in frame`, `staying centered`); **(d)** kamera **satu arc** (static atau one very slow push-in), tidak melompat; **(e)** `ltx_negative_prompt` memuat anti-filler (extra people, cartoon, cafe interior, changing background, scene cut, sudden new objects).
 - I2V: deskripsikan **perubahan temporal**, bukan ulang statis; jangan timestamp
 - **Tone ↔ first frame konsisten:** tone di `ltx_prompt` **wajib** selaras dengan mood `image_prompt`/first frame. Jika first frame `warm golden / soft daylight`, jangan tulis `cold blue night` — transisi besar memicu warping/drift.
 - **`{NEG_BASE}` (artefak dasar — sertakan di setiap `ltx_negative_prompt`):**
   ```text
   morphing, distortion, warping, flicker, jitter, blur, artifacts, glitch, overexposure, watermark, text, subtitles, deformed, extra limbs
+  ```
+- **`{NEG_FILLER}` (anti-halusinasi scene 2–3 — sertakan di `ltx_negative_prompt` scene 2 & 3):**
+  ```text
+  extra people, additional person, second person, crowd, bystanders, cartoon character, mascot, anime, illustration, sketch, comic, cel-shaded, cafe interior, restaurant, coffee shop, shop background, changing background, new scene, scene cut, teleport, sudden new objects appearing, props popping in, style change
   ```
 
 ### Pemisahan positif vs negatif (wajib)
@@ -426,7 +495,7 @@ Generate caption TikTok, Shopee, Instagram. Conversion-focused, standalone persu
 |-------|-----|----------|
 | `ltx_prompt` | Hanya **positif**: aksi, ekspresi, kamera, lighting, kutipan lip sync | `no/not/without/never`, `TikTok`, `UGC`, `subtle natural lip movement` |
 | `ltx_negative_prompt` | Semua larangan visual/artefak | `no lip movement`, `no text`, `not holding clothes`, `no person`, dll. |
-| `negative_prompt` | Untuk **image gen** (OpenAI) — boleh negatif | bukan untuk LTX positive prompt |
+| `negative_prompt` | **Image gen:** metadata QA / fallback gpt-image-2 saja — **tidak dikirim** ke Seedream/FLUX (niat negatif → frasa afirmatif di `image_prompt`) | bukan untuk LTX positive prompt |
 | `avoid` | Metadata QA, digabung backend ke `ltx_negative_prompt` | jangan salin ke `ltx_prompt` |
 
 **Backend `buildLtxPromptFields()`:** otomatis buang `TikTok`/`UGC`, pindah klausa negatif → `ltx_negative_prompt`, ganti `subtle natural lip movement` → frasa kuat, hapus `starts with … smile and speaks` → `speaks` langsung, hapus kutip dialog jika `talkvid: false`.
@@ -435,11 +504,22 @@ Generate caption TikTok, Shopee, Instagram. Conversion-focused, standalone persu
 
 LTX memicu gerak bibir hanya jika **bicara = aksi langsung + kutipan**. Pola **wajib** scene 1 = `{SPEAKS}` — **hanya** kalimat yang dimulai `The talent looks directly into the camera and speaks`.
 
+**Format `ltx_prompt` scene 1 — WAJIB SIMPEL.** Kalimat kompleks bersaing dengan `speaks` dan mematikan lip sync. Format dikunci, total **≤ ~30 kata**:
+```text
+[OPENER]. The talent looks directly into the camera and speaks "[lip_sync_segment verbatim]" with clear lip movement fully in sync with the spoken line.
+```
+- `[OPENER]` = satu fragmen ≤8 kata. **Default (terbukti jalan): `Realistic documentary-style footage, soft natural daylight`** · alt: `Realistic handheld footage, soft natural daylight` / `Realistic indoor footage, natural daylight`.
+- Setelah kutipan: **STOP.** Opsional **maks 1** fragmen penutup ≤4 kata (`Photorealistic.` **atau** `Faint room ambience.`, bukan dua-duanya). Default: tidak ada.
+- Framing, ekspresi, mood skeptis, gesture → **dari first frame image**, **tidak** ditulis di `ltx_prompt` scene 1.
+
+✅ **Benar:** `Realistic documentary-style footage, soft natural daylight. The talent looks directly into the camera and speaks "Kalau tunik, aku pilih Fahira," with clear lip movement fully in sync with the spoken line.`
+❌ **Salah (kompleks → lip sync mati):** menambah `Medium close-up chest-up.` + `The expression shifts to skeptical curiosity with a slight head tilt and one small natural hand gesture. Faint room ambience.` — pindahkan semua itu ke first frame.
+
 | Pola | Status |
 |------|--------|
 | `The talent looks directly into the camera and speaks "[quote]"` | ✅ **Wajib** — satu-satunya pola scene 1 |
 | `The talent speaks "[quote]"` tanpa `looks directly into the camera` | ❌ Ganti ke pola wajib |
-| Deskripsi pose/produk/ekspresi **sebelum** `The talent looks…` | ❌ Pindah **setelah** kutipan |
+| Deskripsi pose/produk/ekspresi/gesture (di mana pun di scene 1) | ❌ Pindah ke first frame image |
 | `direct eye contact`, `eyes locked on lens` sebelum `speaks` | ❌ Mematikan lip sync |
 | `with clear lip movement fully in sync with the spoken line` | ✅ Wajib (pada kalimat kutip) |
 | `starts with a (playful/amused) smile and speaks`, `begins with a smile` **sebelum** `speaks` | ❌ Mematikan lip sync — dilarang |
@@ -447,51 +527,51 @@ LTX memicu gerak bibir hanya jika **bicara = aksi langsung + kutipan**. Pola **w
 | `asking about`, `questioning whether`, `speaks about`, `introducing`, `delivers a line` | ❌ Paraphrase — dilarang |
 | `subtle natural lip movement` | ❌ Lemah — dilarang |
 
-Aturan tambahan: kutip `lip_sync_segment` **verbatim** dalam `"..."` langsung setelah `speaks`. Ekspresi/smile hanya **setelah** kutipan. **Mata ke kamera wajib** di `image_prompt` + `ltx_prompt` scene 1. **Scene 1 hanya satu kutipan** (= `audio_segments[hook].lip_sync_segment`) — larangan kutip kedua / `continues:` / `then speaks`. Jangan tulis frasa negatif bibir di `ltx_prompt` — taruh di `ltx_negative_prompt`. Konteks VO diatur via `audio_segments[context].mode: voiceover_only`.
+Aturan tambahan: kutip `lip_sync_segment` **verbatim** dalam `"..."` langsung setelah `speaks`. **Mata ke kamera wajib** di `image_prompt` + `ltx_prompt` scene 1. **Scene 1 hanya satu kutipan** (= `audio_segments[hook].lip_sync_segment`) — larangan kutip kedua / `continues:` / `then speaks`. Jangan tulis frasa negatif bibir di `ltx_prompt` — taruh di `ltx_negative_prompt`. Konteks VO diatur via `audio_segments[context].mode: voiceover_only`.
 
 ### Petunjuk per `scene_type`
 
 | scene_type | Audio | Gerakan / kamera |
 |------------|-------|------------------|
 | `hook_context` | `hook`: talking_head; `context`: voiceover_only (default) | Mata ke kamera + punch line kutip + lip sync → transisi skeptis + gesture; tetap eye contact |
-| `reveal_demo` | `reveal`: voiceover_only wajib; `demo`: b_roll | Reveal **tanpa lip sync** → demo detail; `talkvid: false` |
-| `product_hero` | b_roll | Static/slow push-in produk |
+| `reveal_demo` | `reveal`: voiceover_only wajib; `demo`: b_roll | **Interaksi talent + produk**, 3 beat kontinu (settle → styling turn → pinch/touch detail) mengisi penuh 7s; `talkvid: false`, tanpa lip sync; subjek selalu in frame |
+| `product_hero` | b_roll | **Produk saja + efek** (light sweep, texture catch, focus shift, hem/shadow drift), one very slow push-in mengisi penuh 6s; produk selalu centered |
 
 ### `ltx_negative_prompt` — contoh isi
 
 > Setiap scene = `{NEG_BASE}` + tambahan spesifik di bawah.
 
-- **Scene 1 (talking head):** `no lip movement, no lip sync, no speaking to camera, listening to voiceover, no speech, subtle natural lip movement, looking away from camera, eyes averted, looking down, off-camera gaze, on-screen text, logos, UI, watermark, morphing, flicker, extreme close-up, product covering mouth`
-- **Scene 2 (no lip sync — wajib):** `speech, lip sync, dialogue in quotes, speaking to camera, mouth movement, holding clothes, runway pose, dramatic spin, frozen mannequin pose, slouchy posture, only camera movement, on-screen text, UI, morphing, flicker, cartoon, illustration`
-- **Scene 3 (anti-drift/kartun):** `person, hands, face, woman, man, human, folded garment, flat lay pile, speech, cartoon, illustration, sketch, anime, comic, cel-shaded, storyboard, furniture, on-screen text, logos, UI, studio catalog look, morphing, flicker, style change, scene cut`
+- **Scene 1 (talking head):** `{NEG_BASE}` + `no lip movement, no lip sync, no speaking to camera, listening to voiceover, no speech, subtle natural lip movement, {NEG_GAZE}, on-screen text, logos, UI, extreme close-up, product covering mouth`
+- **Scene 2 (no lip sync — wajib):** `{NEG_BASE}` + `{NEG_FILLER}` + `speech, lip sync, dialogue in quotes, speaking to camera, mouth movement, holding clothes, runway pose, dramatic spin, frozen mannequin pose, slouchy posture, only camera movement, talent leaving the frame, on-screen text, UI`
+- **Scene 3 (anti-drift/kartun):** `{NEG_BASE}` + `{NEG_FILLER}` + `person, people, hands, face, woman, man, human, folded garment, flat lay pile, speech, furniture, on-screen text, logos, UI, studio catalog look, product leaving the frame`
 
 **Scene 3 anti-drift:** hapus `matching the bedroom from earlier scenes` (bisa menarik wajah dari scene 1), pakai **satu** arc `camera performs a very slow continuous push-in` (bukan `static with push-in` yang kontradiktif).
 
 ### Contoh `ltx_prompt`
 
-**Scene 1 (hook_context, 7s):**
+**Scene 1 (hook_context, 7s) — SIMPEL:**
 ```text
-Realistic documentary-style footage, soft natural daylight. Medium close-up chest-up. The talent looks directly into the camera and speaks "Kalau tunik, aku pilih Fahira," with clear lip movement fully in sync with the spoken line. The expression shifts to skeptical curiosity with a slight head tilt and one small natural hand gesture. Faint room ambience. Photorealistic.
+Realistic documentary-style footage, soft natural daylight. The talent looks directly into the camera and speaks "Kalau tunik, aku pilih Fahira," with clear lip movement fully in sync with the spoken line.
 ```
 
-**Scene 2 (reveal_demo, wearable, 7s):**
+**Scene 2 (reveal_demo, wearable, 7s) — interaksi talent + produk, isi penuh:**
 ```text
-Realistic documentary-style fashion footage, soft natural daylight. Full body shot, camera static. The talent with ideal well-proportioned physique wears the exact outfit from the product reference and stands with compelling confident posture, shifting weight slightly while turning the shoulders to show a flattering full outfit silhouette. The talent then brings one hand to the collar and lightly pinches and releases the fabric once in a single smooth motion to show texture and drape on the body. Faint room ambience. Photorealistic throughout.
+Realistic documentary-style fashion footage, soft natural daylight in the same lived-in indoor corner, the background held steady throughout. Full body shot, camera static. The talent wearing the exact outfit from the product reference first smooths both hands down the front of the tunic from chest to hip to settle the fabric, then slowly turns her torso to one side and back in a confident styling motion so the hem and drape swing naturally and reveal the full silhouette, and finally brings one hand to the collar to gently pinch and release the fabric once, showing its texture and weight while holding a calm confident posture. The motion stays continuous and smooth from the first frame to the last, the talent always in frame and centered. Faint room ambience. Photorealistic throughout.
 ```
 
-**Scene 2 (handheld, VO reveal + b_roll demo):**
+**Scene 2 (handheld, VO reveal + b_roll demo, 7s) — interaksi tangan + produk, isi penuh:**
 ```text
-Realistic documentary-style footage, soft natural daylight. Medium close-up chest-up, subject centered. The talent raises the tumbler to chest level with a calm natural expression, lips relaxed, not speaking to camera. The shot transitions to a medium close-up of hands and product as one hand lightly touches the lid to show the temperature indicator while the tumbler stays stable on the desk. Camera static throughout. Photorealistic.
+Realistic documentary-style footage, soft natural daylight in the same lived-in indoor corner, the background held steady throughout. Medium close-up, subject centered. The talent first lifts the product to chest level and turns it slowly so its front face and label catch the light, then lowers it back onto the desk and rests one hand on it with a calm closed-mouth expression, and finally the framing eases into a closer view of the fingers lightly tracing a key detail of the product while it stays stable on the surface. The motion stays continuous and smooth across the whole shot, the product always in frame and centered. Camera static. Faint room ambience. Photorealistic.
 ```
 
-**Scene 3 (product_hero, wearable, 6s):**
+**Scene 3 (product_hero, wearable, 6s) — produk saja + efek, isi penuh:**
 ```text
-Realistic documentary-style footage, soft natural daylight. Semi close-up product hero shot of the garment hanging at full length on a wooden hanger against a plain wall, complete silhouette and fabric drape centered in frame. The camera performs a very slow continuous push-in toward the hanger as soft daylight gradually shifts across the fabric and the hem sways almost imperceptibly. Faint room ambience. Photorealistic fashion display throughout.
+Realistic documentary-style footage, soft natural daylight in the same lived-in indoor corner, the background held steady throughout. Semi close-up product hero shot of the garment hanging at full length on a wooden hanger against a plain wall, complete silhouette and fabric drape centered in frame, the garment displayed on its own. The camera performs one very slow continuous push-in toward the garment while a soft beam of daylight sweeps gradually across the fabric, the weave texture catching the light, the hem swaying almost imperceptibly, and a gentle focus shift settling onto the button placket. The fabric keeps the same color and shape throughout, the garment staying centered in frame the entire time. Faint room ambience. Photorealistic fashion display throughout.
 ```
 
-**Scene 3 (product_hero, object):**
+**Scene 3 (product_hero, object, 6s) — produk saja + efek, isi penuh:**
 ```text
-Realistic documentary-style footage, soft natural daylight. Semi close-up product hero shot on a clean wooden desk, product centered against a plain uncluttered wall. The camera performs a very slow continuous push-in toward the product as soft daylight gradually shifts across the surface and a faint shadow edge moves slowly across the desk. Faint room ambience. Photorealistic product showcase throughout.
+Realistic documentary-style footage, soft natural daylight in the same lived-in indoor corner, the background held steady throughout. Semi close-up product hero shot of the product placed on a clean wooden desk, centered against a plain uncluttered wall, the product displayed on its own. The camera performs one very slow continuous push-in toward the product while a soft beam of daylight sweeps gradually across its surface, highlights traveling slowly over the contours and label, a faint shadow edge drifting across the desk, and a gentle focus shift settling onto the main detail. The product keeps the same shape and color throughout, staying centered in frame the entire time. Faint room ambience. Photorealistic product showcase throughout.
 ```
 
 ---
@@ -510,7 +590,7 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
     "language": "id",
     "audio_delivery_mode": "hybrid",
     "cta_spoken": "klik keranjang kuning",
-    "continuity_mode": "reference_only",
+    "continuity_mode": "chained",
     "scene_count": 3,
     "product_name": "",
     "category": "",
@@ -540,20 +620,27 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
       "note": "3 LTX clips 7+7+6=20s concat; no pad; scene 2→3 hard cut; CTA via VO only"
     },
     "image_generation": {
-      "api": "openai_v1_images_edits",
-      "model_recommended": "gpt-image-2",
+      "api": "fal_subscribe",
+      "model_recommended": "fal-ai/bytedance/seedream/v4.5/edit",
+      "model_alt": "fal-ai/flux-2-pro",
+      "model_fallback": "gpt-image-2",
+      "text_to_image_endpoint": "fal-ai/bytedance/seedream/v4.5/text-to-image",
+      "reference_convention": "seedream_figure",
+      "negative_supported": false,
       "aspect_ratio": "9:16",
-      "size": "1024x1536",
-      "size_map_note": "Backend ONLY: map meta.aspect_ratio → API size. Never put aspect ratio, orientation, or pixel dimensions in image_prompt.",
+      "image_size": { "width": 2160, "height": 3840 },
+      "size_map_note": "Backend ONLY: map meta.aspect_ratio → image_size. Seedream needs 1920-4096 px per axis (min 1920). 9:16→2160x3840, 1:1→2560x2560, 16:9→3840x2160. Never put aspect ratio, orientation, or pixel dimensions in image_prompt.",
+      "num_images": 1,
+      "max_reference_images": 10,
       "product_image_count": 1,
       "reference_attach_order": ["talent", "product_1", "product_2"],
-      "reference_roles": { "image_1": "talent", "image_2": "product_primary", "image_3": "product_secondary_optional" },
+      "reference_roles": { "figure_1": "talent", "figure_2": "product_primary", "figure_3": "product_secondary_optional" },
       "product_hero_scene_id": 3,
       "product_hero_attach": "product_only",
       "single_frame_rule": "One continuous photograph. No panels, grids, collage.",
-      "anti_studio_negative": "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry",
       "talent_ethnicity_default": "Indonesian — Southeast Asian facial features, warm brown skin, natural Indonesian appearance",
-      "ltx_first_frame_rules": "Center composition, consistent lighting, simple background, no text/signage"
+      "ltx_first_frame_rules": "Center composition, consistent lighting, simple background, no text/signage",
+      "qa_negative_reference": "stock photo, catalog photo, studio lighting, beauty retouching, flawless skin, plastic skin, porcelain skin, airbrushed, magazine shoot, fashion campaign, professional model, CGI, 3D render, tabloid photo, perfect symmetry, caucasian, european, pale white skin, blonde hair, blue eyes, korean idol aesthetic, plain unattractive face, dull expression"
     },
     "ltx_generation": {
       "model": "ltx-2.3",
@@ -601,10 +688,10 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
         { "segment_id": "hook", "segment_type": "hook", "offset_in_scene_s": 0, "duration_s": 3.0, "mode": "talking_head", "talkvid": true, "lip_sync_segment": "", "vo_offset_in_full_tts_s": 0 },
         { "segment_id": "context", "segment_type": "context", "offset_in_scene_s": 3.0, "duration_s": 4.0, "mode": "voiceover_only", "talkvid": false, "lip_sync_segment": "", "vo_offset_in_full_tts_s": 3.0 }
       ],
-      "consistency": { "use_model_reference": true, "use_product_reference": true, "continuity_mode": "reference_only", "continuity_image_from": null },
+      "consistency": { "use_model_reference": true, "use_product_reference": true, "continuity_mode": "chained", "continuity_image_from": null },
       "image_prompt": "", "negative_prompt": "", "ltx_prompt": "", "ltx_negative_prompt": "",
       "camera": "static chest-up",
-      "avoid": "extreme close-up, product covering mouth, paraphrased dialogue, second quoted dialogue, no lip movement, subtle natural lip movement, looking away from camera, eyes averted"
+      "avoid": "extreme close-up, product covering mouth, paraphrased dialogue, second quoted dialogue, no lip movement, subtle natural lip movement, {NEG_GAZE}"
     },
     {
       "scene_id": 2, "scene_name": "Reveal & Demo", "scene_type": "reveal_demo",
@@ -614,7 +701,7 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
         { "segment_id": "reveal", "segment_type": "reveal", "offset_in_scene_s": 0, "duration_s": 3.0, "mode": "voiceover_only", "talkvid": false, "lip_sync_segment": "", "vo_offset_in_full_tts_s": 7.0 },
         { "segment_id": "demo", "segment_type": "demo_detail", "offset_in_scene_s": 3.0, "duration_s": 4.0, "mode": "b_roll", "talkvid": false, "lip_sync_segment": "", "vo_offset_in_full_tts_s": 10.0 }
       ],
-      "consistency": { "use_model_reference": true, "use_product_reference": true, "continuity_mode": "reference_only", "continuity_image_from": null },
+      "consistency": { "use_model_reference": true, "use_product_reference": true, "continuity_mode": "chained", "continuity_image_from": 1 },
       "image_prompt": "", "negative_prompt": "", "ltx_prompt": "", "ltx_negative_prompt": "",
       "camera": "static or very slow push-in",
       "avoid": "holding clothes, speaking to camera, lip sync, dialogue in quotes, speech, mouth movement"
@@ -624,7 +711,7 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
       "duration_seconds": 6.0, "audio_mode": "b_roll", "audio_start": 14.0,
       "framing": "product_semi_close", "product_interaction": "product_display", "lip_sync_segment": "",
       "audio_segments": [],
-      "consistency": { "use_model_reference": false, "use_product_reference": true, "continuity_mode": "reference_only", "continuity_image_from": null },
+      "consistency": { "use_model_reference": false, "use_product_reference": true, "continuity_mode": "chained", "continuity_image_from": null },
       "image_prompt": "", "negative_prompt": "", "ltx_prompt": "", "ltx_negative_prompt": "",
       "camera": "static or very slow push-in on product",
       "avoid": "real person, child face, human hands, folded garment, flat lay pile, text, UI"
@@ -646,14 +733,26 @@ Realistic documentary-style footage, soft natural daylight. Semi close-up produc
 ## Backend pseudocode
 
 ```text
-for each scene in scenes:
+first_frame = {}
+for each scene in scenes sorted by scene_id:   // SEQUENTIAL — chained needs prior output
   files = []
-  if scene.consistency.use_model_reference: files.push(talent_image)
+  // continuity: chained → Figure 1 = output of anchor scene (not original talent)
+  anchor = scene.consistency.continuity_image_from
+  chained = scene.consistency.continuity_mode == "chained"
+  if scene.consistency.use_model_reference:
+    if chained && anchor != null && first_frame[anchor] exists:
+      files.push(first_frame[anchor])        // F1 = prior generated frame (identity + outfit lock)
+    else:
+      files.push(talent_image)               // fallback reference_only (log warning if chained expected)
   if scene.consistency.use_product_reference:
     files.push(product_images[0])
     if meta.image_generation.product_image_count == 2: files.push(product_images[1])
-  size = map_aspect_ratio_to_size(meta.aspect_ratio)  // API param only
-  POST /v1/images/edits { image: files, prompt: scene.image_prompt, size }
+  image_size = map_aspect_ratio_to_image_size(meta.aspect_ratio)  // Seedream 1920-4096/axis; API param only
+  result = fal.subscribe("fal-ai/bytedance/seedream/v4.5/edit", {
+    prompt: scene.image_prompt,   // REFERENCE IMAGES (Figure 1/2/3) + SCENE, affirmative only
+    image_urls: files, image_size, num_images: 1
+  })
+  first_frame[scene.scene_id] = result.images[0].url   // becomes anchor for next chained scene
   assert scene.duration_seconds <= meta.ltx_generation.max_clip_seconds  // 7
   assert sum(scenes.duration_seconds) == 20
   if scene.audio_mode == "hybrid":
@@ -663,6 +762,8 @@ for each scene in scenes:
     assert scene_id in [2,3] implies use_model_reference == false
   else:
     assert scene_id == 3 implies use_model_reference == false
+  if chained && scene.scene_id > 1 && use_model_reference:
+    assert anchor != null   // chained talent scene must name an anchor
 
 clips = []
 for scene in scenes sorted by scene_id:
@@ -698,15 +799,19 @@ assert voiceover_script.tts_script.startsWith("[fast] ")
 - [ ] Output = pure JSON; `meta.spec_variant` = `ugc2_product_hero_close`; **3 scenes**, sum duration = 20 (7+7+6)
 - [ ] `audio_start`: scene 1 = 0, scene 2 = 7.0, scene 3 = 14.0; `audio_segments` sum `duration_s` = `duration_seconds`, `vo_offset` ascending
 - [ ] Scene 1: `talkvid: true`, hook = `talking_head`, context = `voiceover_only`; mata ke kamera; **satu** kutipan saja
-- [ ] Scene 1 `ltx_prompt`: **langsung** `The talent looks directly into the camera and speaks "[quote]"` — maks 1 kalimat framing sebelumnya; **tanpa** basa-basi / `starts with a smile` sebelum `speaks`
+- [ ] Scene 1 `ltx_prompt` **SIMPEL**: `[OPENER ≤8 kata]` + `{SPEAKS}` + (opsional 1 penutup ≤4 kata), **≤~30 kata**, **tanpa** framing/ekspresi/gesture (semua dari first frame)
 - [ ] Scene 2–3: `talkvid: false`; reveal = `voiceover_only`; `ltx_prompt` tanpa kutip/dialog
 - [ ] Scene 2 reveal wearable: full body, `{PHRASE_BODY}`, `lip_sync_segment: ""`
 - [ ] Scene 3: `use_model_reference: false`, produk saja, semi close-up, no person/hands; wearable = hanger/mannequin full display (bukan folded)
 - [ ] `product_display_mode` terisi; pakaian anak = `wearable_kids` + `product_audience: children`, mannequin anak tanpa wajah, dewasa **tidak** memakai produk anak
 - [ ] `ltx_prompt` positif saja (tanpa `no/not`, `TikTok`/`UGC`); larangan di `ltx_negative_prompt`; `ltx_negative_prompt` terisi per scene
-- [ ] `negative_prompt` semua scene memuat `{NEG_STUDIO}`; scene 1–2 tambah `{NEG_ETHNIC}`; `talent_identity.image_negative_avoid` = `{NEG_STUDIO}`
-- [ ] `talent_identity.prompt` menyebut `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** — talent **menarik** tapi bukan studio glamour; terlihat orang Indonesia
-- [ ] Scene 1–2 `image_prompt` / `negative_prompt`: `{PHRASE_APPEAL}` di SCENE; `{NEG_UNATTRACTIVE}` di negative
+- [ ] Scene 1 `ltx_prompt` simpel; **Scene 2–3 isi penuh** (3 beat kontinu / efek, environment dikunci, subjek selalu in frame) + `ltx_negative_prompt` memuat `{NEG_FILLER}` (anti kartun/orang tambahan/cafe/ganti scene)
+- [ ] `meta.image_generation.api` = `fal_subscribe`, `model_recommended` = `fal-ai/bytedance/seedream/v4.5/edit`, `negative_supported: false`; `image_size` 1920–4096/axis (9:16→2160×3840)
+- [ ] `continuity_mode: chained` (default): scene 2 `continuity_image_from: 1` (anchor ke output scene 1); scene 1 & 3 `null`; generate **sekuensial** scene 1→2→3; **hanya** model edit/reference (bukan FLUX schnell)
+- [ ] `image_prompt` `REFERENCE IMAGES` pakai `Figure 1/2/3` (talent/anchor=F1, produk=F2/F3; scene 3 produk=F1); FLUX.2 → "first/second reference image"; scene 2 chained = varian "previous frame of the SAME talent"
+- [ ] `image_prompt` ber-wajah memuat `{PHRASE_ID}`+`{PHRASE_APPEAL}`+`{POS_SKIN}`+`{REAL_CAM}`+`{TAIL_PHONE}` — **tanpa** kirim `{NEG_*}` sebagai field
+- [ ] `negative_prompt` / `talent_identity.image_negative_avoid` diisi `{NEG_STUDIO}` (+ scene 1–2: `{NEG_ETHNIC}`,`{NEG_UNATTRACTIVE}`,`{NEG_GAZE}`) **hanya metadata QA / fallback gpt-image-2**
+- [ ] `talent_identity.prompt` menyebut `{PHRASE_ID}` + **`{PHRASE_APPEAL}`** + `{POS_SKIN}` — talent **menarik** tapi bukan studio glamour; terlihat orang Indonesia
 - [ ] `image_prompt` tanpa aspect ratio/resolusi; blok `SCENE` memuat `{TAIL_PHONE}`; tanpa `candid`/`casual snapshot`
 - [ ] `voiceover_script` dibuka punch line lucu bodoh (5–8 kata); `skeptic_bridge_opener` terisi, **bukan** default `Jujur`
 - [ ] `voice_name` ∈ `allowed_voices[gender]`, sesuai tone (bukan default Puck/Aoede); `gender` = `talent_identity.gender`

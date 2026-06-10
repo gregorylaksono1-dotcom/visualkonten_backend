@@ -25,6 +25,7 @@ GcsBucket="result-visualkonten" \
 VeoVideoDurationSeconds="8" \
 ComfyMaxConcurrentJobs="1" \
 FreeTrialBackend="comfyui" \
+Runpod="false" \
 """
 
 [sandbox.deploy.parameters]
@@ -53,6 +54,7 @@ GenerationBackend="comfyui" \
 GcsBucket="result-visualkonten" \
 VeoVideoDurationSeconds="8" \
 FreeTrialBackend="comfyui" \
+Runpod="false" \
 """
 
 [production.deploy.parameters]
@@ -79,9 +81,10 @@ GoogleClientId="{{resolve:ssm:/visualkonten/prod/google_client_id:1}}" \
 GoogleClientSecret="{{resolve:ssm:/visualkonten/prod/google_client_secret:1}}" \
 UpstashRedisRestUrl="https://probable-macaw-128422.upstash.io" \
 UpstashRedisRestToken="{{resolve:ssm:/visualkonten/prod/UpstashRedisRestToken:1}}" \
-ComfyMaxConcurrentJobs="200" \
+ComfyMaxConcurrentJobs="1" \
 GenerationBackend="comfyui" \
 GcsBucket="result-visualkonten-prod" \
 VeoVideoDurationSeconds="8" \
 FreeTrialBackend="comfyui" \
+Runpod="false" \
 """

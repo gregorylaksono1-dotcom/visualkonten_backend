@@ -5,7 +5,7 @@
  * into API prompt dict. This expands subgraph nodes so Comfy /prompt can run
  * without relying on subgraph UUID class types being registered as node types.
  */
-function graphToApiPrompt(workflowGraph) {
+function graphToApiPrompt(workflowGraph, options = {}) {
   if (!workflowGraph || !Array.isArray(workflowGraph.nodes) || !Array.isArray(workflowGraph.links)) {
     throw new Error("Workflow graph tidak valid: butuh fields nodes[] dan links[].");
   }
@@ -75,6 +75,24 @@ function graphToApiPrompt(workflowGraph) {
       inputs: entry.inputs,
       class_type: node.type,
     };
+  }
+
+  // Bypass LTX rewriter if option is enabled
+  if (options && options.bypassLtxRewriter) {
+    for (const [nodeId, node] of Object.entries(prompt)) {
+      if (node.class_type === "CLIPTextEncode" && Array.isArray(node.inputs?.text)) {
+        const [sourceId, sourceSlot] = node.inputs.text;
+        const sourceNode = prompt[sourceId];
+        if (sourceNode && sourceNode.class_type === "TextGenerateLTX2Prompt") {
+          node.inputs.text = sourceNode.inputs.prompt;
+        }
+      }
+    }
+    for (const [nodeId, node] of Object.entries(prompt)) {
+      if (node.class_type === "TextGenerateLTX2Prompt") {
+        delete prompt[nodeId];
+      }
+    }
   }
 
   return prompt;
@@ -324,13 +342,10 @@ function normalizeNodeInputs(nodeType, inputs) {
   }
 
   if (nodeType === "TextGenerateLTX2Prompt") {
-    const modeValue =
-      typeof inputs.sampling_mode === "string"
-        ? inputs.sampling_mode
-        : inputs.sampling_mode?.sampling_mode;
+    // Force sampling mode off (greedy/deterministic)
     const samplingMode = {
-      selection: modeValue && String(modeValue).trim() ? modeValue : "on",
-      sampling_mode: modeValue && String(modeValue).trim() ? modeValue : "on",
+      selection: "off",
+      sampling_mode: "off",
       temperature:
         inputs.temperature === undefined || isEmptyWidgetValue(inputs.temperature)
           ? 0.7
@@ -344,21 +359,23 @@ function normalizeNodeInputs(nodeType, inputs) {
         inputs.repetition_penalty === undefined || isEmptyWidgetValue(inputs.repetition_penalty)
           ? 1.05
           : inputs.repetition_penalty,
-      seed: inputs.seed === undefined || isEmptyWidgetValue(inputs.seed) ? 0 : inputs.seed,
+      seed: 0,
     };
-    // Compatibility layer across ComfyUI builds:
-    // - some expect `sampling_mode` as plain string
-    // - some expect dynamic-combo object
-    // - some expect flattened dotted keys (sampling_mode.top_p, etc)
-    inputs.sampling_mode = samplingMode.sampling_mode;
-    inputs["sampling_mode.selection"] = samplingMode.selection;
-    inputs["sampling_mode.sampling_mode"] = samplingMode.sampling_mode;
+    inputs.sampling_mode = "off";
+    inputs["sampling_mode.selection"] = "off";
+    inputs["sampling_mode.sampling_mode"] = "off";
     inputs["sampling_mode.temperature"] = samplingMode.temperature;
     inputs["sampling_mode.top_k"] = samplingMode.top_k;
     inputs["sampling_mode.top_p"] = samplingMode.top_p;
     inputs["sampling_mode.min_p"] = samplingMode.min_p;
     inputs["sampling_mode.repetition_penalty"] = samplingMode.repetition_penalty;
-    inputs["sampling_mode.seed"] = samplingMode.seed;
+    inputs["sampling_mode.seed"] = 0;
+    inputs.seed = 0;
+    inputs.seed_control_before_generate = 0;
+    inputs["seed_control_before_generate"] = 0;
+    inputs.use_image = false;
+    inputs["use_image"] = false;
+
     delete inputs.temperature;
     delete inputs.top_k;
     delete inputs.top_p;

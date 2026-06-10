@@ -1,7 +1,7 @@
 const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getJakartaISOString } = require("../utils");
-const { getOpenAiKey, getSignedUrl } = require("../services");
+const { getFalAiKey, getSignedUrl } = require("../services");
 const { generateComfyUIVideo } = require("./videoGeneration");
 
 function resolveImagePrompts(llmResponse, finalJobPrompt) {
@@ -34,52 +34,111 @@ function resolveImagePrompts(llmResponse, finalJobPrompt) {
   return [{ key: "prompt", prompt: legacy, suffix: "main" }];
 }
 
-async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
-  const formData = new FormData();
-  formData.append("model", "gpt-image-1-mini");
-  formData.append("prompt", prompt);
-  formData.append("size", size);
+function normalizeFalApiKey(apiKey) {
+  let key = String(apiKey || "").trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  if (/^key\s+/i.test(key)) {
+    key = key.replace(/^key\s+/i, "").trim();
+  }
+  if (/^bearer\s+/i.test(key)) {
+    key = key.replace(/^bearer\s+/i, "").trim();
+  }
+  return key;
+}
 
-  let imgIndex = 1;
-  for (const url of referenceUrls) {
-    const imgRes = await fetch(url);
-    if (!imgRes.ok) {
-      throw new Error(`Failed to fetch S3 image from URL: ${url}`);
-    }
-    const imgBlob = await imgRes.blob();
-    formData.append("image[]", imgBlob, `image${imgIndex}.png`);
-    imgIndex++;
+async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
+  const { getFalAiKey } = require("../services");
+  let falApiKey = await getFalAiKey();
+  falApiKey = normalizeFalApiKey(falApiKey);
+  if (!falApiKey) {
+    throw new Error("Fal.ai API Key not found in SSM Parameter Store.");
   }
 
-  const response = await fetch("https://api.openai.com/v1/images/edits", {
+  const hasReference = Array.isArray(referenceUrls) && referenceUrls.length > 0 && referenceUrls[0];
+  const modelId = hasReference ? "fal-ai/flux-2/edit" : "fal-ai/flux-2";
+  const endpoint = `https://fal.run/${modelId}`;
+
+  let width = 1024;
+  let height = 1536;
+  if (size) {
+    const parts = size.split("x");
+    if (parts.length === 2) {
+      width = parseInt(parts[0], 10);
+      height = parseInt(parts[1], 10);
+    }
+  }
+
+  const payload = {
+    prompt: prompt,
+    image_size: {
+      width: width,
+      height: height
+    }
+  };
+
+  const guidanceScale = process.env.FAL_GUIDANCE_SCALE ? parseFloat(process.env.FAL_GUIDANCE_SCALE) : null;
+  const numSteps = process.env.FAL_NUM_INFERENCE_STEPS ? parseInt(process.env.FAL_NUM_INFERENCE_STEPS, 10) : null;
+
+  if (guidanceScale !== null && !isNaN(guidanceScale)) {
+    payload.guidance_scale = guidanceScale;
+  }
+  if (numSteps !== null && !isNaN(numSteps)) {
+    payload.num_inference_steps = numSteps;
+  }
+
+  if (hasReference) {
+    const urls = referenceUrls.filter(Boolean);
+    payload.image_urls = urls;
+    if (urls.length > 0) {
+      payload.image_url = urls[0];
+    }
+  }
+
+  console.log(`[Fal.ai ImageGen] Calling endpoint ${endpoint} for prompt: "${prompt.slice(0, 100)}..." and size: ${width}x${height}`);
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: formData
+    headers: {
+      "Authorization": `Key ${falApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`OpenAI API error (${response.status}): ${errText}`);
+    if (response.status === 401) {
+      const maskedKey = falApiKey.length > 8
+        ? `${falApiKey.slice(0, 4)}...${falApiKey.slice(-4)}`
+        : "***";
+      throw new Error(
+        `Fal.ai API error (401): ${errText}\n` +
+        `  -> FAL_KEY terdeteksi: "${maskedKey}" (panjang: ${falApiKey.length} karakter).\n` +
+        `  -> Pastikan Key ini valid di SSM Parameter Store / Environment, dan tidak mengandung karakter literal '<' atau '>'.`
+      );
+    }
+    throw new Error(`Fal.ai API error (${response.status}): ${errText}`);
   }
 
   const resJson = await response.json();
-  const b64Data = resJson.data?.[0]?.b64_json;
-  const urlData = resJson.data?.[0]?.url;
+  const urlData = resJson.images?.[0]?.url;
 
-  if (b64Data) {
-    return { buffer: Buffer.from(b64Data, "base64"), fallbackUrl: "" };
-  }
   if (urlData) {
+    console.log(`[Fal.ai ImageGen] Download generated image from fal.ai: ${urlData}`);
     const imgDownloadRes = await fetch(urlData);
     if (!imgDownloadRes.ok) {
-      throw new Error(`Failed to download generated image from OpenAI URL: ${imgDownloadRes.status}`);
+      throw new Error(`Failed to download generated image from fal.ai: ${imgDownloadRes.status}`);
     }
     return {
       buffer: Buffer.from(await imgDownloadRes.arrayBuffer()),
       fallbackUrl: urlData
     };
   }
-  throw new Error(`No image data returned from OpenAI Edit API. Response: ${JSON.stringify(resJson)}`);
+  throw new Error(`No image data returned from fal.ai API. Response: ${JSON.stringify(resJson)}`);
 }
 
 async function generateImageOpenAI(params) {
@@ -88,12 +147,12 @@ async function generateImageOpenAI(params) {
     S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, comfyApiKey, audio, audioDuration, requestType
   } = params;
 
-  console.log(`[OpenAI ImageGen] Starting OpenAI Image Edit generation for job ${jobId}`);
+  console.log(`[Fal.ai ImageGen] Starting Fal.ai Image generation for job ${jobId}`);
 
   try {
-    const apiKey = await getOpenAiKey();
+    const apiKey = await getFalAiKey();
     if (!apiKey) {
-      throw new Error("OpenAI API Key not found in consolidated secrets.");
+      throw new Error("Fal.ai API Key not found in consolidated secrets.");
     }
 
     let size = "1024x1536";

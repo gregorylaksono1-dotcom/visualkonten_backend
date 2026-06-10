@@ -2,7 +2,7 @@ const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const path = require("path");
 const { getJakartaISOString } = require("../utils");
-const { getOpenAiKey, getSignedUrl, uploadInputImage, uploadInputAudio, submitWorkflow } = require("../services");
+const { getFalAiKey, getSignedUrl, uploadInputImage, uploadInputAudio, submitWorkflow } = require("../services");
 const { callOpenAIImageEdit } = require("./imageGenerationOpenAI");
 const {
   buildMultiSceneWorkflow,
@@ -87,9 +87,9 @@ async function generateMultiScenePipeline(params) {
   let redis = null;
 
   try {
-    const apiKey = await getOpenAiKey();
+    const apiKey = await getFalAiKey();
     if (!apiKey) {
-      throw new Error("OpenAI API Key not found in secrets.");
+      throw new Error("Fal.ai API Key not found in secrets.");
     }
 
     let size = "1024x1536"; // default 9:16
@@ -345,6 +345,9 @@ async function generateMultiScenePipeline(params) {
     const runpod = process.env.RUNPOD === "true";
     const s3FilenamePrefix = `${userId || "anonymous"}_${jobId}`;
 
+    const bypassLtxRewriter = process.env.BYPASS_LTX_REWRITER === "true" ||
+      (llmResponse && llmResponse.meta && (llmResponse.meta.bypass_ltx_rewriter === true || llmResponse.meta.bypass_rewriter === true));
+
     const workflow = buildMultiSceneWorkflow(workflowScenes, {
       baseFile: path.join(__dirname, "..", "workflow", "base1scene.json"),
       audioFile: comfyAudioName,
@@ -354,7 +357,8 @@ async function generateMultiScenePipeline(params) {
       height: h,
       upscale: videoQuality === "1080p" ? Math.max(w, h) * 1.2 : Math.max(w, h),
       runpod,
-      s3FilenamePrefix
+      s3FilenamePrefix,
+      bypassLtxRewriter
     });
 
     applyWorkflowAssetFilenames(workflow, {
@@ -362,7 +366,7 @@ async function generateMultiScenePipeline(params) {
       sceneImageFilenames
     });
 
-    const apiPrompt = graphToApiPrompt(workflow);
+    const apiPrompt = graphToApiPrompt(workflow, { bypassLtxRewriter });
     applySceneNegativePrompts(apiPrompt, workflowScenes);
 
     console.log("[MultiSceneGen] Workflow JSON for debugging:\n" + JSON.stringify(apiPrompt, null, 2));

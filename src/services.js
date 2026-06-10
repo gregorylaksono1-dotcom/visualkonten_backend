@@ -297,6 +297,11 @@ const getComfyApiKeys = async () => {
   return secrets.comfy_api_key || null;
 };
 
+const getFalAiKey = async () => {
+  const secrets = await getSecrets();
+  return secrets.fal_ai || null;
+};
+
 const callOpenAILLM = async (systemPrompt, userPrompt) => {
   console.log("Starting OpenAI gpt-5-mini call...");
   const apiKey = await getOpenAiKey();
@@ -593,6 +598,7 @@ module.exports = {
   uploadToS3,
   callOpenAILLM,
   getOpenAiKey,
+  getFalAiKey,
   callGeminiAudio,
   getRedis,
   pickComfyApiKey,

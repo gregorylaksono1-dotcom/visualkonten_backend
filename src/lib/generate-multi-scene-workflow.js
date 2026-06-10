@@ -180,6 +180,14 @@ function buildMultiSceneWorkflow(scenes, options = {}) {
 
     removeCameramanLoraNode(sg);
     removeDetailerLoraNode(sg);
+
+    // Apply LTX Prompt rewriter fixes (sampling_mode, use_image, seed)
+    configureLtxRewriterNodesInSubgraph(sg);
+
+    // Bypass rewriter completely if option is enabled
+    if (options.bypassLtxRewriter) {
+      bypassLtxRewriterInSubgraph(sg);
+    }
   });
   const SUBGRAPH_TYPE = base.definitions.subgraphs[0].id;
   const SUBGRAPH_TYPE_NOTV = base.definitions.subgraphs[1].id;
@@ -672,6 +680,56 @@ function applySceneNegativePrompts(apiPrompt, scenes) {
     }
     apiPrompt[nodeKey].inputs.text = negativePrompt;
   });
+}
+
+function configureLtxRewriterNodesInSubgraph(sg) {
+  if (!sg || !Array.isArray(sg.nodes)) return;
+  for (const node of sg.nodes) {
+    if (node.type !== "TextGenerateLTX2Prompt") continue;
+    if (Array.isArray(node.widgets_values)) {
+      if (node.widgets_values.length > 2) node.widgets_values[2] = "off";
+      if (node.widgets_values.length > 8) node.widgets_values[8] = 0;
+      if (node.widgets_values.length > 9) node.widgets_values[9] = 0;
+      if (node.widgets_values.length > 11) node.widgets_values[11] = false;
+    } else if (node.widgets_values && typeof node.widgets_values === "object") {
+      node.widgets_values.sampling_mode = "off";
+      node.widgets_values.use_image = false;
+      node.widgets_values.seed = 0;
+      node.widgets_values.seed_control_before_generate = 0;
+    }
+  }
+}
+
+function bypassLtxRewriterInSubgraph(sg) {
+  if (!sg || !Array.isArray(sg.nodes) || !Array.isArray(sg.links)) return;
+  const rewriterNodes = sg.nodes.filter(n => n.type === "TextGenerateLTX2Prompt");
+  if (!rewriterNodes.length) return;
+
+  for (const rewriter of rewriterNodes) {
+    const rewriterId = rewriter.id;
+    const promptInputIdx = Array.isArray(rewriter.inputs) 
+      ? rewriter.inputs.findIndex(inp => inp && inp.name === "prompt")
+      : -1;
+    if (promptInputIdx === -1) continue;
+
+    const inputLink = sg.links.find(lk => lk.target_id === rewriterId && lk.target_slot === promptInputIdx);
+    if (!inputLink) continue;
+
+    const sourceNodeId = inputLink.origin_id;
+    const sourceSlot = inputLink.origin_slot;
+    const outputLinks = sg.links.filter(lk => lk.origin_id === rewriterId && lk.origin_slot === 0);
+
+    for (const outLink of outputLinks) {
+      outLink.origin_id = sourceNodeId;
+      outLink.origin_slot = sourceSlot;
+    }
+
+    const inputLinkIdx = sg.links.indexOf(inputLink);
+    if (inputLinkIdx !== -1) sg.links.splice(inputLinkIdx, 1);
+
+    const rewriterIdx = sg.nodes.indexOf(rewriter);
+    if (rewriterIdx !== -1) sg.nodes.splice(rewriterIdx, 1);
+  }
 }
 
 module.exports = {

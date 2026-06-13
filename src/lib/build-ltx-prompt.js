@@ -102,6 +102,8 @@ function isTalkvidScene(scene) {
   if (scene?.talkvid === false) return false;
   if (NO_TALKVID_SCENE_TYPES.has(scene?.scene_type)) return false;
   if (scene?.talkvid === true) return true;
+  if (scene?.scene_type === "talking_head" || scene?.scene_type === "trial_talent") return true;
+  if (scene?.audio_mode === "talking_head") return true;
   if (Array.isArray(scene?.audio_segments)) {
     return scene.audio_segments.some(
       (seg) => seg.talkvid === true || seg.mode === "talking_head"

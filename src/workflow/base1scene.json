@@ -2593,7 +2593,7 @@
                 "name": "STRING",
                 "type": "STRING",
                 "links": [
-                  747
+                  746
                 ]
               }
             ],
@@ -2617,177 +2617,6 @@
             },
             "widgets_values": [
               ""
-            ]
-          },
-          {
-            "id": 342,
-            "type": "TextGenerateLTX2Prompt",
-            "pos": [
-              1339.9997900572612,
-              2999.9997856104146
-            ],
-            "size": [
-              400,
-              412
-            ],
-            "flags": {
-              "collapsed": false
-            },
-            "order": 47,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "clip",
-                "name": "clip",
-                "type": "CLIP",
-                "link": 742
-              },
-              {
-                "localized_name": "image",
-                "name": "image",
-                "shape": 7,
-                "type": "IMAGE",
-                "link": 748
-              },
-              {
-                "localized_name": "video",
-                "name": "video",
-                "shape": 7,
-                "type": "IMAGE",
-                "link": null
-              },
-              {
-                "localized_name": "audio",
-                "name": "audio",
-                "shape": 7,
-                "type": "AUDIO",
-                "link": null
-              },
-              {
-                "localized_name": "prompt",
-                "name": "prompt",
-                "type": "STRING",
-                "widget": {
-                  "name": "prompt"
-                },
-                "link": 747
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "generated_text",
-                "name": "generated_text",
-                "type": "STRING",
-                "links": [
-                  743,
-                  746
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "TextGenerateLTX2Prompt",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              "",
-              256,
-              "on",
-              0.7,
-              64,
-              0.95,
-              0.05,
-              1.05,
-              0,
-              0,
-              false,
-              true
-            ]
-          },
-          {
-            "id": 344,
-            "type": "LoraLoader",
-            "pos": [
-              879.999833896668,
-              2999.9997856104146
-            ],
-            "size": [
-              300,
-              200
-            ],
-            "flags": {},
-            "order": 49,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "model",
-                "name": "model",
-                "type": "MODEL",
-                "link": 744
-              },
-              {
-                "localized_name": "clip",
-                "name": "clip",
-                "type": "CLIP",
-                "link": 745
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "MODEL",
-                "name": "MODEL",
-                "type": "MODEL",
-                "links": null
-              },
-              {
-                "localized_name": "CLIP",
-                "name": "CLIP",
-                "type": "CLIP",
-                "links": [
-                  742
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "LoraLoader",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "models": [
-                {
-                  "name": "gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-                  "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/loras/gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-                  "directory": "loras"
-                }
-              ],
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              "gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-              1,
-              1
             ]
           },
           {
@@ -2836,8 +2665,7 @@
                 "name": "resized",
                 "type": "IMAGE,MASK",
                 "links": [
-                  659,
-                  748
+                  659
                 ]
               }
             ],
@@ -2864,59 +2692,6 @@
               1088,
               "center",
               "lanczos"
-            ]
-          },
-          {
-            "id": 343,
-            "type": "PreviewAny",
-            "pos": [
-              1779.9998675106544,
-              2989.9998462568146
-            ],
-            "size": [
-              480,
-              290
-            ],
-            "flags": {},
-            "order": 48,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "source",
-                "name": "source",
-                "type": "*",
-                "link": 743
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "STRING",
-                "name": "STRING",
-                "type": "STRING",
-                "links": null
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "PreviewAny",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              null,
-              null,
-              null
             ]
           },
           {
@@ -4385,22 +4160,6 @@
             "type": "COMBO"
           },
           {
-            "id": 742,
-            "origin_id": 344,
-            "origin_slot": 1,
-            "target_id": 342,
-            "target_slot": 0,
-            "type": "CLIP"
-          },
-          {
-            "id": 743,
-            "origin_id": 342,
-            "origin_slot": 0,
-            "target_id": 343,
-            "target_slot": 0,
-            "type": "STRING"
-          },
-          {
             "id": 744,
             "origin_id": 317,
             "origin_slot": 0,
@@ -4418,27 +4177,11 @@
           },
           {
             "id": 746,
-            "origin_id": 342,
+            "origin_id": 319,
             "origin_slot": 0,
             "target_id": 306,
             "target_slot": 1,
             "type": "STRING"
-          },
-          {
-            "id": 747,
-            "origin_id": 319,
-            "origin_slot": 0,
-            "target_id": 342,
-            "target_slot": 4,
-            "type": "STRING"
-          },
-          {
-            "id": 748,
-            "origin_id": 297,
-            "origin_slot": 0,
-            "target_id": 342,
-            "target_slot": 1,
-            "type": "IMAGE"
           },
           {
             "id": 928,
@@ -7084,7 +6827,7 @@
                 "name": "STRING",
                 "type": "STRING",
                 "links": [
-                  747
+                  746
                 ]
               }
             ],
@@ -7108,177 +6851,6 @@
             },
             "widgets_values": [
               ""
-            ]
-          },
-          {
-            "id": 342,
-            "type": "TextGenerateLTX2Prompt",
-            "pos": [
-              1339.9997900572612,
-              2999.9997856104146
-            ],
-            "size": [
-              400,
-              412
-            ],
-            "flags": {
-              "collapsed": false
-            },
-            "order": 47,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "clip",
-                "name": "clip",
-                "type": "CLIP",
-                "link": 742
-              },
-              {
-                "localized_name": "image",
-                "name": "image",
-                "shape": 7,
-                "type": "IMAGE",
-                "link": 748
-              },
-              {
-                "localized_name": "video",
-                "name": "video",
-                "shape": 7,
-                "type": "IMAGE",
-                "link": null
-              },
-              {
-                "localized_name": "audio",
-                "name": "audio",
-                "shape": 7,
-                "type": "AUDIO",
-                "link": null
-              },
-              {
-                "localized_name": "prompt",
-                "name": "prompt",
-                "type": "STRING",
-                "widget": {
-                  "name": "prompt"
-                },
-                "link": 747
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "generated_text",
-                "name": "generated_text",
-                "type": "STRING",
-                "links": [
-                  743,
-                  746
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "TextGenerateLTX2Prompt",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              "",
-              256,
-              "on",
-              0.7,
-              64,
-              0.95,
-              0.05,
-              1.05,
-              0,
-              0,
-              false,
-              true
-            ]
-          },
-          {
-            "id": 344,
-            "type": "LoraLoader",
-            "pos": [
-              879.999833896668,
-              2999.9997856104146
-            ],
-            "size": [
-              300,
-              200
-            ],
-            "flags": {},
-            "order": 49,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "model",
-                "name": "model",
-                "type": "MODEL",
-                "link": 744
-              },
-              {
-                "localized_name": "clip",
-                "name": "clip",
-                "type": "CLIP",
-                "link": 745
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "MODEL",
-                "name": "MODEL",
-                "type": "MODEL",
-                "links": null
-              },
-              {
-                "localized_name": "CLIP",
-                "name": "CLIP",
-                "type": "CLIP",
-                "links": [
-                  742
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "LoraLoader",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "models": [
-                {
-                  "name": "gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-                  "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/loras/gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-                  "directory": "loras"
-                }
-              ],
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              "gemma-3-12b-it-abliterated_lora_rank64_bf16.safetensors",
-              1,
-              1
             ]
           },
           {
@@ -7327,8 +6899,7 @@
                 "name": "resized",
                 "type": "IMAGE,MASK",
                 "links": [
-                  659,
-                  748
+                  659
                 ]
               }
             ],
@@ -7355,59 +6926,6 @@
               1088,
               "center",
               "lanczos"
-            ]
-          },
-          {
-            "id": 343,
-            "type": "PreviewAny",
-            "pos": [
-              1779.9998675106544,
-              2989.9998462568146
-            ],
-            "size": [
-              480,
-              290
-            ],
-            "flags": {},
-            "order": 48,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "source",
-                "name": "source",
-                "type": "*",
-                "link": 743
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "STRING",
-                "name": "STRING",
-                "type": "STRING",
-                "links": null
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "PreviewAny",
-              "cnr_id": "comfy-core",
-              "ver": "0.16.3",
-              "enableTabs": false,
-              "hasSecondTab": false,
-              "secondTabOffset": 80,
-              "secondTabText": "Send Back",
-              "secondTabWidth": 65,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "ue_properties": {
-                "input_ue_unconnectable": {},
-                "version": "7.7",
-                "widget_ue_connectable": {}
-              }
-            },
-            "widgets_values": [
-              null,
-              null,
-              null
             ]
           },
           {
@@ -8806,22 +8324,6 @@
             "type": "COMBO"
           },
           {
-            "id": 742,
-            "origin_id": 344,
-            "origin_slot": 1,
-            "target_id": 342,
-            "target_slot": 0,
-            "type": "CLIP"
-          },
-          {
-            "id": 743,
-            "origin_id": 342,
-            "origin_slot": 0,
-            "target_id": 343,
-            "target_slot": 0,
-            "type": "STRING"
-          },
-          {
             "id": 744,
             "origin_id": 317,
             "origin_slot": 0,
@@ -8839,27 +8341,11 @@
           },
           {
             "id": 746,
-            "origin_id": 342,
+            "origin_id": 319,
             "origin_slot": 0,
             "target_id": 306,
             "target_slot": 1,
             "type": "STRING"
-          },
-          {
-            "id": 747,
-            "origin_id": 319,
-            "origin_slot": 0,
-            "target_id": 342,
-            "target_slot": 4,
-            "type": "STRING"
-          },
-          {
-            "id": 748,
-            "origin_id": 297,
-            "origin_slot": 0,
-            "target_id": 342,
-            "target_slot": 1,
-            "type": "IMAGE"
           },
           {
             "id": 928,

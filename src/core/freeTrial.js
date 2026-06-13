@@ -168,7 +168,7 @@ async function processFreeTrialJob(params) {
     console.log("[FreeTrial] Running Free Trial under comfyui backend for job", job.uuid);
     const { callOpenAILLM, callGeminiAudio, uploadToS3, getRedis, pickComfyApiKey, getComfyApiKeys } = require("../services");
     const { generateTTS } = require("./tts");
-    const { generateMultiScenePipeline } = require("./multiSceneGeneration");
+    const { generateMultiScenePipeline } = require("./ugcWorkflowGeneration");
     const { buildTtsGlobalConfig, syncGenderFields } = require("../lib/resolve-voice");
 
     const redis = getRedis();

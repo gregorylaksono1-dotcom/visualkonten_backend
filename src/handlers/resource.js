@@ -2,13 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
-const { docClient, s3Client, TransactWriteCommand, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, PutCommand, GetCommand } = require("../services");
+const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction } = require("../services");
 
-const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
-const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
 const GENERATION_BACKEND = process.env.GENERATION_BACKEND || "comfyui";
-const INSUFFICIENT_CREDIT_MESSAGE = "Kredit tidak mencukupi. Silakan top up kredit.";
 
 exports.handlePostResource = async (event) => {
   const claims = getClaims(event);
@@ -39,6 +36,8 @@ exports.handlePostResource = async (event) => {
     if (!isFreeTrialRequested && requestType === "multi-shot-video") {
       pricingKey = body.ugc_mode === "toko" ? "UGC-S" : "UGC-P";
       requestType = pricingKey;
+    } else if (!isFreeTrialRequested && (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK")) {
+      pricingKey = "PRODUCT-CINEMATIC";
     } else if (!isFreeTrialRequested) {
       pricingKey = `${hasImage ? "IMAGE-TO-VIDEO" : "TEXT-TO-VIDEO"}-${videoQuality.replace("p", "")}`;
     }
@@ -56,7 +55,7 @@ exports.handlePostResource = async (event) => {
   if (!pricing) return response(404, { error: `Pricing not found for ${pricingKey}.` });
 
   let finalAmount = pricing.amount;
-  if ((requestType === "UGC-P" || requestType === "UGC-S") && pricing.item.attr) {
+  if ((requestType === "UGC-P" || requestType === "UGC-S" || requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") && pricing.item.attr) {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
@@ -73,15 +72,11 @@ exports.handlePostResource = async (event) => {
   const requestId = randomUUID();
   const now = getJakartaISOString();
 
-  const profileRes = await docClient.send(new GetCommand({
-    TableName: PROFILE_TABLE_NAME,
-    Key: { user_id: String(userId), user_type: "CUSTOMER" },
-  }));
-  const profileItem = profileRes?.Item || {};
+  const profileItem = await getCustomerProfile(userId);
   const profileCreditBalance = Number(profileItem.credit_balance || 0);
   if (!(profileCreditBalance >= finalAmount)) {
     return response(402, {
-      error: INSUFFICIENT_CREDIT_MESSAGE,
+      error: "Kredit tidak mencukupi. Silakan top up kredit.",
       error_code: "INSUFFICIENT_CREDIT",
       required_credit: finalAmount,
       current_credit: profileCreditBalance,
@@ -93,50 +88,6 @@ exports.handlePostResource = async (event) => {
       return response(402, { error: "Akses Tester sudah terpakai", error_code: "FREE_TRIAL_UNAVAILABLE" });
     }
   }
-
-  const runResourceTransact = async (putItem) => {
-    try {
-      const expressionAttributeValues = { ":z": 0, ":c": finalAmount, ":now": now };
-      if (requestType === "FREE-TRIAL") {
-        expressionAttributeValues[":one"] = 1;
-      }
-
-      await docClient.send(new TransactWriteCommand({
-        TransactItems: [
-          { Put: { TableName: USER_REQUEST_TABLE_NAME, Item: putItem } },
-          {
-            Update: {
-              TableName: PROFILE_TABLE_NAME,
-              Key: { user_id: String(userId), user_type: "CUSTOMER" },
-              UpdateExpression:
-                requestType === "FREE-TRIAL"
-                  ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                  : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
-              ConditionExpression:
-                requestType === "FREE-TRIAL"
-                  ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
-                  : "attribute_exists(user_id) AND credit_balance >= :c",
-              ExpressionAttributeValues: expressionAttributeValues,
-            }
-          },
-        ],
-      }));
-      return null;
-    } catch (err) {
-      console.error("Transact error", err.message);
-      if (requestType === "FREE-TRIAL" && err.name === "TransactionCanceledException") {
-        return response(402, { error: "Akses Tester sudah terpakai" });
-      }
-      if (err.name === "TransactionCanceledException") {
-        return response(402, {
-          error: INSUFFICIENT_CREDIT_MESSAGE,
-          error_code: "INSUFFICIENT_CREDIT",
-          required_credit: finalAmount,
-        });
-      }
-      return response(500, { error: err.message });
-    }
-  };
 
   const imagesToUpload = [];
   if (imageBase64_1.trim()) imagesToUpload.push({ base64: imageBase64_1, suffix: "1" });
@@ -168,7 +119,13 @@ exports.handlePostResource = async (event) => {
     free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
   };
 
-  const errRes = await runResourceTransact(putItem);
+  const errRes = await executeResourceRequestTransaction({
+    putItem,
+    finalAmount,
+    userId,
+    requestType,
+    now
+  });
   if (errRes) return errRes;
 
   const jobPayload = {

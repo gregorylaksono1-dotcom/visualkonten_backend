@@ -1,5 +1,5 @@
 const { response, getClaims, usageEmailCandidates, mapUserRequestUsageRow, getJakartaISOString } = require("../utils");
-const { docClient, QueryCommand, scanUserRequestsForUsage } = require("../services");
+const { scanUserRequestsForUsage, queryUserRequestsByEmail, s3Client, GetObjectCommand, getSignedUrl } = require("../services");
 
 const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
 const USER_REQUEST_USER_EMAIL_INDEX = process.env.USER_REQUEST_USER_EMAIL_INDEX;
@@ -22,24 +22,10 @@ exports.handleGetUsage = async (event) => {
   if (USER_REQUEST_USER_EMAIL_INDEX) {
     for (const em of candidates) {
       try {
-        const queryParams = {
-          TableName: USER_REQUEST_TABLE_NAME,
-          IndexName: USER_REQUEST_USER_EMAIL_INDEX,
-          KeyConditionExpression: "user_email = :e AND created_at >= :c",
-          ExpressionAttributeValues: { ":e": em, ":c": sinceIso },
-          ScanIndexForward: false,
-          Limit: limit,
-        };
-        if (nextToken) {
-          try {
-            queryParams.ExclusiveStartKey = JSON.parse(Buffer.from(nextToken, "base64").toString());
-          } catch (e) {}
-        }
-
-        const res = await docClient.send(new QueryCommand(queryParams));
-        for (const it of res.Items || []) byUuid.set(it.uuid, it);
-        if (res.LastEvaluatedKey) {
-          lastEvaluatedKey = Buffer.from(JSON.stringify(res.LastEvaluatedKey)).toString("base64");
+        const result = await queryUserRequestsByEmail(em, sinceIso, limit, nextToken);
+        for (const it of result.items) byUuid.set(it.uuid, it);
+        if (result.lastEvaluatedKey) {
+          lastEvaluatedKey = Buffer.from(JSON.stringify(result.lastEvaluatedKey)).toString("base64");
         }
       } catch (err) {
         console.error("GET /usage GSI error", err.message);
@@ -48,7 +34,6 @@ exports.handleGetUsage = async (event) => {
   }
 
   const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
-  const { s3Client, GetObjectCommand, getSignedUrl } = require("../services");
 
   const items = [...byUuid.values()];
   if (!items.length && !nextToken) {

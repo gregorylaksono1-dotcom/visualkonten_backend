@@ -47,11 +47,25 @@ const generateUgcLlmResponse = async ({
   lipSync = true,
   callLLM,
 }) => {
-  if (requestType !== "UGC-P" && requestType !== "UGC-S" && requestType !== "FREE-TRIAL") {
+  if (
+    requestType !== "UGC-P" &&
+    requestType !== "UGC-S" &&
+    requestType !== "FREE-TRIAL" &&
+    requestType !== "PRODUCT-CINEMATIC" &&
+    requestType !== "PRODUCT-CINEMATIK"
+  ) {
     throw new Error(`generateUgcLlmResponse: unsupported requestType ${requestType}`);
   }
 
   const opts = { videoDuration, sellingMode, lipSync };
+
+  if (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") {
+    console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading and sending product_ad.md as prompt builder to OpenAI`);
+    const template = fs.readFileSync(path.join(PROMPT_DIR, "product_ad.md"), "utf-8");
+    const userPrompt = `1. {product_description}: ${description}\n2. {video_duration}: ${videoDuration} detik`;
+    const aiResponse = await callLLM(template, userPrompt);
+    return parseJsonFromLlm(aiResponse);
+  }
 
   if (requestType === "FREE-TRIAL") {
     console.log(`[UGC-LLM] FREE-TRIAL request: Reading and sending ugc_free_trial.md as prompt builder to OpenAI`);

@@ -1,10 +1,8 @@
 "use strict";
 
-const { docClient, s3Client, GetObjectCommand, getSignedUrl } = require("../services");
+const { s3Client, GetObjectCommand, getSignedUrl, batchGetJobStatus } = require("../services");
 const { response, getClaims, normalizeUserEmail, parseBody } = require("../utils");
-const { BatchGetCommand } = require("@aws-sdk/lib-dynamodb");
 
-const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET;
 
 /**
@@ -43,15 +41,7 @@ exports.handleBatchStatus = async (event) => {
             user_email: userEmail 
         }));
 
-        const result = await docClient.send(new BatchGetCommand({
-            RequestItems: {
-                [USER_REQUEST_TABLE]: {
-                    Keys: keys
-                }
-            }
-        }));
-
-        const items = result.Responses[USER_REQUEST_TABLE] || [];
+        const items = await batchGetJobStatus(keys);
         
         // Process each item to add signed URLs
         const processedItems = await Promise.all(items.map(async (item) => {

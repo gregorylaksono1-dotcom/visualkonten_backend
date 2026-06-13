@@ -214,7 +214,7 @@ exports.handler = async (event) => {
               ":now": getJakartaISOString(),
               ":uak": comfyApiKey
             };
-            if (job.comfy_prompt_id !== undefined || job.request_type === "FREE-TRIAL" || job.request_type === "UGC-P" || job.request_type === "UGC-S") {
+            if (job.comfy_prompt_id !== undefined || job.request_type === "FREE-TRIAL" || job.request_type === "UGC-P" || job.request_type === "UGC-S" || job.request_type === "PRODUCT-CINEMATIC" || job.request_type === "PRODUCT-CINEMATIK") {
               updates.push("comfy_prompt_id = :pid");
               exprValues[":pid"] = promptId;
             } else {

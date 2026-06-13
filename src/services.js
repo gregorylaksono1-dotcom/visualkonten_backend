@@ -15,9 +15,10 @@ const {
   GetCommand,
   PutCommand,
   TransactWriteCommand,
+  BatchGetCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const { Redis } = require("@upstash/redis");
-const { parseCreditsFromPricingItem, buildCreditStatusFilterParts } = require("./utils");
+const { parseCreditsFromPricingItem, buildCreditStatusFilterParts, response } = require("./utils");
 
 const region = process.env.AWS_REGION || "ap-southeast-1";
 const client = new DynamoDBClient({ region });
@@ -31,6 +32,8 @@ const lambdaClient = new LambdaClient({ region });
 const { getSecrets } = require("./lib/config");
 
 const PRICING_TABLE_NAME = process.env.PRICING_TABLE_NAME;
+const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
+const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
 const COMFYUI_FUNCTION_NAME = process.env.COMFYUI_FUNCTION_NAME;
 const FREE_TRIAL_FUNCTION_NAME = process.env.FREE_TRIAL_FUNCTION_NAME;
 const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
@@ -448,7 +451,7 @@ const pickComfyApiKey = async (apiKeysString, redis) => {
 };
 
 const COMFY_BASE_URL = "https://cloud.comfy.org";
-// const COMFY_BASE_URL = "http://34.81.171.110:8188";
+// const COMFY_BASE_URL = "http://34.81.97.103:8188";
 
 const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputImage");
@@ -576,6 +579,145 @@ const getOutputUrl = async (promptId, apiKey) => {
   return null;
 };
 
+const getCustomerProfile = async (userId) => {
+  const getRes = await docClient.send(new GetCommand({
+    TableName: PROFILE_TABLE_NAME,
+    Key: { user_id: String(userId), user_type: "CUSTOMER" },
+  }));
+  return getRes?.Item || {};
+};
+
+const getUserProfile = async (userId) => {
+  const result = await docClient.send(new QueryCommand({
+    TableName: PROFILE_TABLE_NAME,
+    KeyConditionExpression: "user_id = :userId",
+    ExpressionAttributeValues: { ":userId": userId },
+    Limit: 1,
+  }));
+  return result.Items?.[0] || null;
+};
+
+const queryTopupCreditHistory = async (email, limit, startKey) => {
+  const table = process.env.TOPUP_CREDIT_TABLE_NAME;
+  const index = process.env.TOPUP_CREDIT_USER_EMAIL_INDEX;
+  const result = await docClient.send(new QueryCommand({
+    TableName: table,
+    IndexName: index,
+    KeyConditionExpression: "user_email = :email",
+    ExpressionAttributeValues: { ":email": email },
+    ScanIndexForward: false,
+    Limit: limit,
+    ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+  }));
+  return { items: result.Items || [], lastEvaluatedKey: result.LastEvaluatedKey || null };
+};
+
+const getTopupOrder = async (orderId) => {
+  const table = process.env.TOPUP_CREDIT_TABLE_NAME;
+  const res = await docClient.send(new QueryCommand({
+    TableName: table,
+    KeyConditionExpression: "#uuid = :orderId",
+    ExpressionAttributeNames: { "#uuid": "uuid" },
+    ExpressionAttributeValues: { ":orderId": orderId },
+  }));
+  return res.Items?.[0] || null;
+};
+
+const queryUserRequestsByEmail = async (email, sinceIso, limit, nextToken) => {
+  const table = process.env.USER_REQUEST_TABLE_NAME;
+  const index = process.env.USER_REQUEST_USER_EMAIL_INDEX;
+  const queryParams = {
+    TableName: table,
+    IndexName: index,
+    KeyConditionExpression: "user_email = :e AND created_at >= :c",
+    ExpressionAttributeValues: { ":e": email, ":c": sinceIso },
+    ScanIndexForward: false,
+    Limit: limit,
+  };
+  if (nextToken) {
+    try {
+      queryParams.ExclusiveStartKey = JSON.parse(Buffer.from(nextToken, "base64").toString());
+    } catch (e) {}
+  }
+
+  const res = await docClient.send(new QueryCommand(queryParams));
+  return { items: res.Items || [], lastEvaluatedKey: res.LastEvaluatedKey || null };
+};
+
+const batchGetJobStatus = async (keys) => {
+  const table = process.env.USER_REQUEST_TABLE_NAME;
+  const result = await docClient.send(new BatchGetCommand({
+    RequestItems: {
+      [table]: {
+        Keys: keys
+      }
+    }
+  }));
+  return result.Responses[table] || [];
+};
+
+const createTopupOrder = async ({ orderId, userEmail, userId, amount, total, now }) => {
+  const table = process.env.TOPUP_CREDIT_TABLE_NAME;
+  await docClient.send(new PutCommand({
+    TableName: table,
+    Item: {
+      uuid: orderId,
+      user_email: userEmail,
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+      amount,
+      total,
+      status: "PENDING",
+    },
+  }));
+};
+
+const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now }) => {
+  try {
+    const expressionAttributeValues = { ":z": 0, ":c": finalAmount, ":now": now };
+    if (requestType === "FREE-TRIAL") {
+      expressionAttributeValues[":one"] = 1;
+    }
+
+    await docClient.send(new TransactWriteCommand({
+      TransactItems: [
+        { Put: { TableName: USER_REQUEST_TABLE_NAME, Item: putItem } },
+        {
+          Update: {
+            TableName: PROFILE_TABLE_NAME,
+            Key: { user_id: String(userId), user_type: "CUSTOMER" },
+            UpdateExpression:
+              requestType === "FREE-TRIAL"
+                ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
+                : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
+            ConditionExpression:
+              requestType === "FREE-TRIAL"
+                ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
+                : "attribute_exists(user_id) AND credit_balance >= :c",
+            ExpressionAttributeValues: expressionAttributeValues,
+          }
+        },
+      ],
+    }));
+    return null;
+  } catch (err) {
+    console.error("Transact error", err.message);
+    const INSUFFICIENT_CREDIT_MESSAGE = "Kredit tidak mencukupi. Silakan top up kredit.";
+    if (requestType === "FREE-TRIAL" && err.name === "TransactionCanceledException") {
+      return response(402, { error: "Akses Tester sudah terpakai" });
+    }
+    if (err.name === "TransactionCanceledException") {
+      return response(402, {
+        error: INSUFFICIENT_CREDIT_MESSAGE,
+        error_code: "INSUFFICIENT_CREDIT",
+        required_credit: finalAmount,
+      });
+    }
+    return response(500, { error: err.message });
+  }
+};
+
 module.exports = {
   docClient,
   s3Client,
@@ -607,6 +749,14 @@ module.exports = {
   uploadInputAudio,
   submitWorkflow,
   getOutputUrl,
-  resolveSignedUrl
+  resolveSignedUrl,
+  getCustomerProfile,
+  getUserProfile,
+  queryTopupCreditHistory,
+  getTopupOrder,
+  queryUserRequestsByEmail,
+  batchGetJobStatus,
+  createTopupOrder,
+  executeResourceRequestTransaction
 };
 

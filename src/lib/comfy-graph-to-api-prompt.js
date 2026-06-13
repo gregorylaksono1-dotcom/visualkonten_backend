@@ -423,7 +423,6 @@ function extractWidgetInputValues(node) {
   return out;
 }
 
-/** Widget array index → API input name (when inputs[] metadata is incomplete). */
 const WIDGET_INDEX_BY_TYPE = {
   LTXAVTextEncoderLoader: {
     text_encoder: 0,
@@ -448,6 +447,11 @@ const WIDGET_INDEX_BY_TYPE = {
     seed_control_before_generate: 9,
     cache_model: 10,
     use_image: 11,
+  },
+  LTXVEmptyLatentAudio: {
+    frames_number: 0,
+    frame_rate: 1,
+    batch_size: 2,
   },
 };
 
@@ -484,6 +488,7 @@ const WIDGET_INPUT_KEYS_BY_TYPE = {
   EmptyLTXVLatentVideo: ["width", "height", "length", "batch_size"],
   VAEDecodeTiled: ["tile_size", "overlap", "temporal_size", "temporal_overlap"],
   SaveVideoFilesS3: ["filename_prefix"],
+  LTXVEmptyLatentAudio: ["frames_number", "frame_rate", "batch_size"],
 };
 
 module.exports = { graphToApiPrompt };

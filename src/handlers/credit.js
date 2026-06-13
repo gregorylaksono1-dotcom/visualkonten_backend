@@ -1,10 +1,5 @@
 const { response, getClaims, buildCreditStatusFilterParts, normalizeUserEmail } = require("../utils");
-const { queryCreditHistoryPaged, sumSuccessfulSpending } = require("../services");
-const { docClient, QueryCommand } = require("../services");
-
-const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
-const TOPUP_CREDIT_TABLE_NAME = process.env.TOPUP_CREDIT_TABLE_NAME;
-const TOPUP_CREDIT_USER_EMAIL_INDEX = process.env.TOPUP_CREDIT_USER_EMAIL_INDEX;
+const { queryCreditHistoryPaged, sumSuccessfulSpending, getUserProfile, queryTopupCreditHistory } = require("../services");
 
 exports.handleGetCredit = async (event) => {
   const claims = getClaims(event);
@@ -22,13 +17,7 @@ exports.handleGetCredit = async (event) => {
 
   if (userId) {
     try {
-      const profileRes = await docClient.send(new QueryCommand({
-        TableName: PROFILE_TABLE_NAME,
-        KeyConditionExpression: "user_id = :userId",
-        ExpressionAttributeValues: { ":userId": userId },
-        Limit: 1,
-      }));
-      const profileItem = profileRes.Items?.[0];
+      const profileItem = await getUserProfile(userId);
       if (profileItem) {
         liveBalance = Number(profileItem.credit_balance ?? 0);
         liveUsage = Number(profileItem.credit_usage ?? 0);
@@ -84,22 +73,10 @@ exports.handleGetCredit = async (event) => {
 
   try {
     if (!wantsExtendedHistory && statusGroup === "all") {
-      const result = await docClient.send(
-        new QueryCommand({
-          TableName: TOPUP_CREDIT_TABLE_NAME,
-          IndexName: TOPUP_CREDIT_USER_EMAIL_INDEX,
-          KeyConditionExpression: "user_email = :email",
-          ExpressionAttributeValues: {
-            ":email": targetEmail,
-          },
-          ScanIndexForward: false,
-          Limit: requestedLimit,
-          ...(startKey ? { ExclusiveStartKey: startKey } : {}),
-        })
-      );
-      items = result.Items || [];
-      if (result.LastEvaluatedKey) {
-        resNextToken = Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString("base64");
+      const result = await queryTopupCreditHistory(targetEmail, requestedLimit, startKey);
+      items = result.items || [];
+      if (result.lastEvaluatedKey) {
+        resNextToken = Buffer.from(JSON.stringify(result.lastEvaluatedKey)).toString("base64");
       }
     } else {
       const paged = await queryCreditHistoryPaged(targetEmail, filterParts, requestedLimit, 50, 10, startKey);

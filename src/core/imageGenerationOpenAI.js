@@ -51,6 +51,8 @@ function normalizeFalApiKey(apiKey) {
   return key;
 }
 
+const USE_FLUX_DEV = false; //true
+
 async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
   const { getFalAiKey } = require("../services");
   let falApiKey = await getFalAiKey();
@@ -60,7 +62,13 @@ async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
   }
 
   const hasReference = Array.isArray(referenceUrls) && referenceUrls.length > 0 && referenceUrls[0];
-  const modelId = hasReference ? "fal-ai/flux-2/edit" : "fal-ai/flux-2";
+
+  let modelId;
+  if (USE_FLUX_DEV) {
+    modelId = hasReference ? "fal-ai/flux/dev/image-to-image" : "fal-ai/flux/dev";
+  } else {
+    modelId = hasReference ? "fal-ai/flux-2/edit" : "fal-ai/flux-2";
+  }
   const endpoint = `https://fal.run/${modelId}`;
 
   let width = 1024;
@@ -168,9 +176,9 @@ async function generateImageOpenAI(params) {
 
     const orderedJobs = isThreeFrameProduct
       ? [...promptJobs].sort((a, b) => {
-          const order = { hero_frame: 0, transition_frame: 1, reveal_start_frame: 2, product_frame: 0, talent_frame: 1 };
-          return (order[a.key] ?? 9) - (order[b.key] ?? 9);
-        })
+        const order = { hero_frame: 0, transition_frame: 1, reveal_start_frame: 2, product_frame: 0, talent_frame: 1 };
+        return (order[a.key] ?? 9) - (order[b.key] ?? 9);
+      })
       : isTwoFrame
         ? [...promptJobs].sort((a, b) => (a.key === "product_frame" || a.key === "hero_frame" ? -1 : 1))
         : promptJobs;

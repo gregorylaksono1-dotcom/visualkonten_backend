@@ -167,17 +167,32 @@ async function updateUserRequestCompleted(jobId, s3Key) {
     return;
   }
 
+  const now = getJakartaISOString();
+  const videoGenStart = item.video_gen_start_at || item.created_at;
+  let videoGenDuration = null;
+  if (videoGenStart) {
+    videoGenDuration = Math.round((Date.now() - Date.parse(videoGenStart)) / 1000);
+  }
+
+  const updates = ["#s = :s", "result_url = :r", "updated_at = :u"];
+  const exprValues = {
+    ":s": "COMPLETED",
+    ":r": s3Key,
+    ":u": now,
+  };
+
+  if (videoGenDuration !== null) {
+    updates.push("video_generation_duration = :vgd");
+    exprValues[":vgd"] = videoGenDuration;
+  }
+
   await dynamo.send(
     new UpdateCommand({
       TableName: USER_REQUEST_TABLE_NAME,
       Key: { uuid: jobId, user_email: item.user_email },
-      UpdateExpression: "SET #s = :s, result_url = :r, updated_at = :u",
+      UpdateExpression: "SET " + updates.join(", "),
       ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: {
-        ":s": "COMPLETED",
-        ":r": s3Key,
-        ":u": getJakartaISOString(),
-      },
+      ExpressionAttributeValues: exprValues,
     })
   );
 }

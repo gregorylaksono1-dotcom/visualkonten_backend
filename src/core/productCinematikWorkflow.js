@@ -4,7 +4,6 @@ const path = require("path");
 const fs = require("fs");
 const { getJakartaISOString } = require("../utils");
 const { getFalAiKey, getSignedUrl, uploadInputImage, submitWorkflow } = require("../services");
-const { callOpenAIImageEdit } = require("./imageGenerationOpenAI");
 const { graphToApiPrompt } = require("../lib/comfy-graph-to-api-prompt");
 
 const WORKFLOW_NODE_IDS = {
@@ -83,6 +82,134 @@ function bypassLtxRewriterInSubgraph(sg) {
   }
 }
 
+function bypassGemma3LoraInSubgraph(sg) {
+  if (!sg || !Array.isArray(sg.nodes) || !Array.isArray(sg.links)) return;
+  const gemmaNodes = sg.nodes.filter(n => {
+    if (n.type !== "LoraLoader" && n.type !== "LoraLoaderModelOnly") return false;
+    if (!Array.isArray(n.widgets_values)) return false;
+    const loraName = String(n.widgets_values[0] || "").toLowerCase();
+    return loraName.includes("gemma-3");
+  });
+
+  for (const loraNode of gemmaNodes) {
+    const loraId = loraNode.id;
+    const modelLink = sg.links.find(lk => lk.target_id === loraId && lk.target_slot === 0);
+    const clipLink = sg.links.find(lk => lk.target_id === loraId && lk.target_slot === 1);
+    const otherIncomingLinks = sg.links.filter(lk => lk.target_id === loraId && lk.target_slot > 1);
+
+    if (modelLink) {
+      const sourceModelId = modelLink.origin_id;
+      const sourceModelSlot = modelLink.origin_slot;
+      const outgoingModelLinks = sg.links.filter(lk => lk.origin_id === loraId && lk.origin_slot === 0);
+      for (const outLink of outgoingModelLinks) {
+        outLink.origin_id = sourceModelId;
+        outLink.origin_slot = sourceModelSlot;
+      }
+    }
+
+    if (clipLink) {
+      const sourceClipId = clipLink.origin_id;
+      const sourceClipSlot = clipLink.origin_slot;
+      const outgoingClipLinks = sg.links.filter(lk => lk.origin_id === loraId && lk.origin_slot === 1);
+      for (const outLink of outgoingClipLinks) {
+        outLink.origin_id = sourceClipId;
+        outLink.origin_slot = sourceClipSlot;
+      }
+    }
+
+    const incomingLinksToRemove = [modelLink, clipLink, ...otherIncomingLinks].filter(Boolean);
+    for (const lk of incomingLinksToRemove) {
+      const idx = sg.links.indexOf(lk);
+      if (idx !== -1) sg.links.splice(idx, 1);
+    }
+
+    const nodeIdx = sg.nodes.indexOf(loraNode);
+    if (nodeIdx !== -1) sg.nodes.splice(nodeIdx, 1);
+    
+    console.log(`[productCinematikWorkflow] Bypassed and removed Gemma-3 LoRA node ${loraId}`);
+  }
+}
+
+function modifySubgraphToOutputImageAndAudio(sg) {
+  if (!sg || !Array.isArray(sg.nodes) || !Array.isArray(sg.links)) return;
+
+  // Find the CreateVideo node (type "CreateVideo", typically ID 242)
+  const createVideoNode = sg.nodes.find(n => n.type === "CreateVideo");
+  if (!createVideoNode) {
+    return;
+  }
+  const createVideoId = createVideoNode.id;
+
+  // Find the incoming links to CreateVideo node
+  const imagesLink = sg.links.find(lk => lk.target_id === createVideoId && lk.target_slot === 0);
+  const audioLink = sg.links.find(lk => lk.target_id === createVideoId && lk.target_slot === 1);
+
+  if (!imagesLink || !audioLink) {
+    console.log("[productCinematikWorkflow] Could not find images/audio inputs for CreateVideo. Skipping subgraph modification.");
+    return;
+  }
+
+  const sourceImageId = imagesLink.origin_id;
+  const sourceImageSlot = imagesLink.origin_slot;
+
+  const sourceAudioId = audioLink.origin_id;
+  const sourceAudioSlot = audioLink.origin_slot;
+
+  // Re-route the outgoing link from CreateVideo node to outputNode -20 slot 0
+  const outgoingLink = sg.links.find(lk => lk.origin_id === createVideoId && lk.origin_slot === 0);
+  if (outgoingLink) {
+    outgoingLink.origin_id = sourceImageId;
+    outgoingLink.origin_slot = sourceImageSlot;
+    outgoingLink.type = "IMAGE";
+  }
+
+  // Add a new link to connect sourceAudioId to outputNode -20 slot 1
+  const nextSubLinkId = Math.max(...sg.links.map(lk => lk.id)) + 1;
+  sg.links.push({
+    id: nextSubLinkId,
+    origin_id: sourceAudioId,
+    origin_slot: sourceAudioSlot,
+    target_id: -20,
+    target_slot: 1,
+    type: "AUDIO"
+  });
+
+  const imageLinkVal = outgoingLink ? outgoingLink.id : 536;
+
+  // Update the subgraph outputs definition with proper linkIds referencing internal links
+  sg.outputs = [
+    {
+      id: "954ef307-c897-4eea-8b5c-5c6ce15a5357",
+      name: "IMAGE_BATCH",
+      type: "IMAGE",
+      localized_name: "IMAGE_BATCH",
+      linkIds: [imageLinkVal],
+      pos: [6119.8984375, 4184]
+    },
+    {
+      id: "audio_output_id_custom",
+      name: "AUDIO",
+      type: "AUDIO",
+      localized_name: "AUDIO",
+      linkIds: [nextSubLinkId],
+      pos: [6119.8984375, 4220]
+    }
+  ];
+
+  // Remove the incoming links to CreateVideo
+  const createVideoLinks = sg.links.filter(lk => lk.target_id === createVideoId);
+  for (const lk of createVideoLinks) {
+    const idx = sg.links.indexOf(lk);
+    if (idx !== -1) sg.links.splice(idx, 1);
+  }
+
+  // Remove the CreateVideo node itself
+  const nodeIdx = sg.nodes.indexOf(createVideoNode);
+  if (nodeIdx !== -1) sg.nodes.splice(nodeIdx, 1);
+
+  console.log("[productCinematikWorkflow] Subgraph output successfully modified to IMAGE_BATCH and AUDIO!");
+}
+
 function applyWorkflowAssetFilenames(workflow, { sceneImageFilenames }) {
   sceneImageFilenames.forEach((filename, i) => {
     const node = workflow.nodes.find((n) => n.id === WORKFLOW_NODE_IDS.loadImage(i));
@@ -99,7 +226,7 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
 
   const baseFile =
     options.baseFile ||
-    path.join(__dirname, "..", "workflow", "video_ltx2_3_i2v.json");
+    path.join(__dirname, "..", "workflow", "workflow_cinematic_ad.json");
   const resolution = resolveLtxResolution(options);
 
   const base = JSON.parse(fs.readFileSync(baseFile, "utf-8"));
@@ -107,8 +234,11 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
     // Apply resolution updates inside subgraph nodes if applicable
     const byId = Object.fromEntries((sg.nodes || []).map((n) => [n.id, n]));
     if (byId[330]?.widgets_values) byId[330].widgets_values[0] = resolution.width;
+    if (byId[257]?.widgets_values) byId[257].widgets_values[0] = resolution.width;
     if (byId[324]?.widgets_values) byId[324].widgets_values[0] = resolution.height;
+    if (byId[258]?.widgets_values) byId[258].widgets_values[0] = resolution.height;
     if (byId[294]?.widgets_values) byId[294].widgets_values[0] = resolution.upscale;
+    if (byId[235]?.widgets_values) byId[235].widgets_values[0] = resolution.upscale;
 
     // Apply LTX Prompt rewriter configurations
     configureLtxRewriterNodesInSubgraph(sg);
@@ -117,6 +247,24 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
     if (options.bypassLtxRewriter) {
       bypassLtxRewriterInSubgraph(sg);
     }
+
+    // Bypass and remove Gemma-3 LoRA node
+    bypassGemma3LoraInSubgraph(sg);
+
+    // Modify subgraph outputs to output IMAGE and AUDIO separately
+    modifySubgraphToOutputImageAndAudio(sg);
+
+    // Fallback: Disable Gemma-3 LoRA if present in the subgraph (set strengths to 0)
+    (sg.nodes || []).forEach((node) => {
+      if ((node.type === "LoraLoader" || node.type === "LoraLoaderModelOnly") && Array.isArray(node.widgets_values)) {
+        const loraName = String(node.widgets_values[0] || "").toLowerCase();
+        if (loraName.includes("gemma-3")) {
+          console.log(`[productCinematikWorkflow] Disabling Gemma-3 LoRA in node ${node.id}`);
+          if (node.widgets_values.length > 1) node.widgets_values[1] = 0;
+          if (node.widgets_values.length > 2) node.widgets_values[2] = 0;
+        }
+      }
+    });
   });
 
   const SUBGRAPH_TYPE = base.definitions.subgraphs[0].id;
@@ -515,7 +663,8 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
 async function generateProductCinematicPipeline(params) {
   const {
     jobId, userEmail, userId, currentS3ImageUrls, llmResponse, finalJobPrompt, videoQuality, aspectRatio,
-    S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, requestType
+    S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, requestType,
+    existingJob
   } = params;
 
   console.log(`[ProductCinematic] Starting product cinematic multi-scene pipeline for job ${jobId}`);
@@ -524,108 +673,40 @@ async function generateProductCinematicPipeline(params) {
   let redis = null;
 
   try {
-    const apiKey = await getFalAiKey();
-    if (!apiKey) {
-      throw new Error("Fal.ai API Key not found in secrets.");
-    }
-
-    let size = "1024x1536"; // default 9:16
-    if (aspectRatio === "16:9") {
-      size = "1536x1024";
-    } else if (aspectRatio === "1:1") {
-      size = "1024x1024";
-    }
-
     const scenes = llmResponse.scene || llmResponse.scenes || [];
     if (!Array.isArray(scenes) || scenes.length === 0) {
       throw new Error("No scenes found in LLM response for Product Cinematic multi-scene generation.");
     }
 
     const generatedScenes = [];
-    const folder = "generated_image";
-
-    // Generate first frames for each scene (Save to S3, do not upload to ComfyUI yet)
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
       const sceneId = scene.scene_id || (i + 1);
 
-      if (scene.consistency?.generate_first_frame === false) {
-        const imageUrl = currentS3ImageUrls[0];
-        console.log(`[ProductCinematic] Scene ${sceneId} generate_first_frame is false. Using user uploaded image directly: ${imageUrl}`);
+      const existingScene = Array.isArray(existingJob?.generated_scenes)
+        ? existingJob.generated_scenes.find(gs => gs.scene_id === sceneId)
+        : null;
 
-        generatedScenes.push({
-          scene_id: sceneId,
-          s3_key: null,
-          url: imageUrl
-        });
-      } else {
-        let scenePrompt = scene.image_prompt || finalJobPrompt;
-        const negativePrompt = String(scene.image_negative_prompt || scene.negative_prompt || "").trim();
-        if (negativePrompt) {
-          scenePrompt = `${scenePrompt.trim()}. Avoid: ${negativePrompt}.`;
-        }
-        console.log(`[ProductCinematic] Generating image for Scene ${sceneId}: "${scenePrompt.slice(0, 80)}..."`);
-
-        // Use the user's uploaded product photo as the primary reference image
-        const sceneReferenceUrls = currentS3ImageUrls;
-
-        const { buffer, fallbackUrl } = await callOpenAIImageEdit({
-          apiKey,
-          prompt: scenePrompt,
-          size,
-          referenceUrls: sceneReferenceUrls
-        });
-
-        const s3Key = `${folder}/${userId || "anonymous"}/${jobId}_scene_${sceneId}.png`;
-
-        await s3.send(new PutObjectCommand({
-          Bucket: S3_RESOURCE_BUCKET,
-          Key: s3Key,
-          Body: buffer,
-          ContentType: "image/png"
-        }));
-
-        const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: s3Key });
-        const signedUrl = fallbackUrl || (await getSignedUrl(s3, imgCmd, { expiresIn: 3600 }));
-
-        generatedScenes.push({
-          scene_id: sceneId,
-          s3_key: s3Key,
-          url: signedUrl
-        });
+      if (!existingScene) {
+        throw new Error(`Missing generated scene keyframe for Scene ${sceneId} from preview stage.`);
       }
+
+      let sceneUrl = existingScene.url;
+      if (existingScene.s3_key) {
+        try {
+          const imgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: existingScene.s3_key });
+          sceneUrl = await getSignedUrl(s3, imgCmd, { expiresIn: 3600 });
+        } catch (e) {
+          console.error(`Error resigning for scene ${sceneId}`, e);
+        }
+      }
+
+      generatedScenes.push({
+        scene_id: sceneId,
+        s3_key: existingScene.s3_key,
+        url: sceneUrl
+      });
     }
-
-    // Update DynamoDB with generated S3 asset keys first
-    const primaryS3Key = generatedScenes.find(gs => gs.s3_key)?.s3_key || null;
-    const updateExpr = ["generated_image = :genImg", "generated_scenes = :genScenes", "updated_at = :now"];
-    const exprValues = {
-      ":genImg": primaryS3Key,
-      ":genScenes": generatedScenes.map(gs => ({
-        scene_id: gs.scene_id,
-        s3_key: gs.s3_key,
-        url: gs.url
-      })),
-      ":now": getJakartaISOString()
-    };
-
-    const newImageKeys = [];
-    generatedScenes.forEach(gs => {
-      if (gs.s3_key) newImageKeys.push(gs.s3_key);
-    });
-
-    if (newImageKeys.length > 0) {
-      updateExpr.push("s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys)");
-      exprValues[":empty_list"] = [];
-      exprValues[":newKeys"] = newImageKeys;
-    }
-
-    await dynamo.send(new UpdateCommand({
-      TableName: USER_REQUEST_TABLE,
-      Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET " + updateExpr.join(", "),
-      ExpressionAttributeValues: exprValues
-    }));
 
     // Predict ComfyUI filenames and construct workflow
     const sceneImageFilenames = generatedScenes.map(gs => `${jobId}_scene_${gs.scene_id}.png`);
@@ -662,12 +743,10 @@ async function generateProductCinematicPipeline(params) {
       (llmResponse && llmResponse.meta && (llmResponse.meta.bypass_ltx_rewriter === true || llmResponse.meta.bypass_rewriter === true));
 
     const workflow = buildProductCinematicWorkflow(workflowScenes, {
-      baseFile: path.join(__dirname, "..", "workflow", "video_ltx2_3_i2v.json"),
+      baseFile: path.join(__dirname, "..", "workflow", "workflow_cinematic_ad.json"),
       width: w,
       height: h,
       fps: 25,
-      runpod,
-      s3FilenamePrefix,
       bypassLtxRewriter
     });
 

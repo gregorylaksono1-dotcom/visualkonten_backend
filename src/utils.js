@@ -48,6 +48,13 @@ const mapUserRequestUsageRow = (item) => ({
   result_url: item.result_url ?? null,
   generated_image: item.generated_image ?? null,
   llm_response: item.llm_response ?? null,
+  preview: item.preview ?? null,
+  video_quality: item.video_quality ?? null,
+  aspect_ratio: item.aspect_ratio ?? null,
+  generated_scenes: item.generated_scenes ?? null,
+  error_message: item.error_message ?? null,
+  preview_duration: item.preview_duration ?? null,
+  video_generation_duration: item.video_generation_duration ?? null,
 });
 
 const parseImageBase64 = (raw) => {

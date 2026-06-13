@@ -464,6 +464,20 @@ const DEFAULT_WIDGETS_BY_TYPE = {
 };
 
 const WIDGET_INPUT_KEYS_BY_TYPE = {
+  AudioConcat: ["direction"],
+  GeminiTTS: [
+    "prompt",
+    "tts_model",
+    "voice",
+    "temperature",
+    "gemini_api_key",
+    "auto_fallback_to_flash",
+    "retry_delay",
+    "use_paid_tier",
+    "billing_project_id",
+    "aggressive_retry",
+    "show_voice_info"
+  ],
   PrimitiveStringMultiline: ["value"],
   PrimitiveInt: ["value"],
   PrimitiveFloat: ["value"],

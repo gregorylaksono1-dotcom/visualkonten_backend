@@ -15,7 +15,7 @@
 "use strict";
 
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, PutCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const { getJakartaISOString } = require("./utils");
 const { buildWorkflow } = require("./workflows");
 const {
@@ -32,8 +32,8 @@ const { generateProductCinematicPipeline } = require("./core/productCinematikWor
 const { buildTtsGlobalConfig, syncGenderFields } = require("./lib/resolve-voice");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// const COMFY_BASE_URL = "http://34.81.171.110:8188";
-const COMFY_BASE_URL = "http://cloud.comfy.org";
+const COMFY_BASE_URL = "http://35.194.132.28:8188";
+// const COMFY_BASE_URL = "http://cloud.comfy.org";
 const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
 const STATUS_INDEX = process.env.STATUS_CREATED_INDEX_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -47,7 +47,7 @@ const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }
 
 // ─── DynamoDB helpers ─────────────────────────────────────────────────────────
 
-const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId } = {}) => {
+const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId, videoGenerationDuration, usedApiKey } = {}) => {
   const updates = ["#s = :s", "updated_at = :u"];
   const names = { "#s": "status" };
   const values = { ":s": status, ":u": getJakartaISOString() };
@@ -60,9 +60,13 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
     updates.push("comfy_prompt_id = :cp");
     values[":cp"] = comfyPromptId;
   }
-  if (arguments[3]?.usedApiKey) {
+  if (usedApiKey) {
     updates.push("used_api_key = :uak");
-    values[":uak"] = arguments[3].usedApiKey;
+    values[":uak"] = usedApiKey;
+  }
+  if (videoGenerationDuration !== undefined && videoGenerationDuration !== null) {
+    updates.push("video_generation_duration = :vgd");
+    values[":vgd"] = videoGenerationDuration;
   }
 
   try {
@@ -138,11 +142,17 @@ const checkSingleJobStatus = async (job, redis) => {
     if (!res.ok) return;
     const { status } = await res.json();
     if (status === "completed" || status === "failed" || status === "cancelled") {
+      const videoGenStart = job.video_gen_start_at || job.created_at;
+      let videoGenerationDuration = null;
+      if (videoGenStart) {
+        videoGenerationDuration = Math.round((Date.now() - Date.parse(videoGenStart)) / 1000);
+      }
+
       if (status === "completed") {
         const resultUrl = await getOutputUrl(promptId, apiKey);
-        await updateDynamoStatus(job.uuid, job.user_email, "COMPLETED", { resultUrl });
+        await updateDynamoStatus(job.uuid, job.user_email, "COMPLETED", { resultUrl, videoGenerationDuration });
       } else {
-        await updateDynamoStatus(job.uuid, job.user_email, "FAILED");
+        await updateDynamoStatus(job.uuid, job.user_email, "FAILED", { videoGenerationDuration });
       }
 
       // Release the Redis API key counter
@@ -170,7 +180,8 @@ const handlePolling = async () => {
 };
 
 const handleSubmission = async (event) => {
-  const { jobId, userEmail, requestType, prompt, videoQuality, aspectRatio, s3ImageUrls } = event;
+  const submissionStartTime = Date.now();
+  const { jobId, userEmail, requestType, prompt, videoQuality, aspectRatio, s3ImageUrls, preview } = event;
 
   let finalJobPrompt = prompt;
   let currentS3ImageUrls = Array.isArray(s3ImageUrls) ? s3ImageUrls : (s3ImageUrls ? [s3ImageUrls] : []);
@@ -181,6 +192,18 @@ const handleSubmission = async (event) => {
   // 2. Define redis and comfyApiKey (will be picked later in generators)
   const redis = getRedis();
   const comfyApiKey = undefined;
+
+  // Retrieve existing job details from DB to see if LLM or TTS can be reused
+  let existingJob = {};
+  try {
+    const jobGet = await dynamo.send(new GetCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail }
+    }));
+    existingJob = jobGet.Item || {};
+  } catch (err) {
+    console.error("[Worker] Error fetching existing request:", err.message);
+  }
 
   // 3. Process Heavy AI Requirements (LLM & Gemini)
   const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S";
@@ -194,71 +217,132 @@ const handleSubmission = async (event) => {
       const sellingMode = event.selling_mode || "hard";
       const videoDuration = event.video_duration || 15;
 
-      const llmResponse = await generateUgcLlmResponse({
-        requestType,
-        prompt,
-        storeType,
-        sellingMode,
-        videoDuration,
-        lipSync: isUgcMode,
-        callLLM: callOpenAILLM,
-      });
+      let llmResponse = existingJob.llm_response;
+      if (!llmResponse) {
+        llmResponse = await generateUgcLlmResponse({
+          requestType,
+          prompt,
+          storeType,
+          sellingMode,
+          videoDuration,
+          lipSync: isUgcMode,
+          callLLM: callOpenAILLM,
+        });
 
-      if (llmResponse) {
-        try {
-          if (isUgcMode) {
-            if (llmResponse.voiceover_script && typeof llmResponse.voiceover_script === "object") {
-              if (!llmResponse.tts_script) {
-                llmResponse.tts_script = llmResponse.voiceover_script.tts_script || llmResponse.voiceover_script.script;
+        if (llmResponse) {
+          try {
+            if (isUgcMode) {
+              if (llmResponse.voiceover_script && typeof llmResponse.voiceover_script === "object") {
+                if (!llmResponse.tts_script) {
+                  llmResponse.tts_script = llmResponse.voiceover_script.tts_script || llmResponse.voiceover_script.script;
+                }
+                if (llmResponse.voiceover_script.word_count != null && llmResponse.tts_word_count == null) {
+                  llmResponse.tts_word_count = llmResponse.voiceover_script.word_count;
+                }
               }
-              if (llmResponse.voiceover_script.word_count != null && llmResponse.tts_word_count == null) {
-                llmResponse.tts_word_count = llmResponse.voiceover_script.word_count;
+              syncGenderFields(llmResponse);
+              llmResponse.tts_global_config = buildTtsGlobalConfig(llmResponse, {
+                voiceSelectionMode: event.voice_selection_mode || llmResponse.meta?.voice_selection_mode,
+                preferredVoice: event.preferred_voice || llmResponse.meta?.preferred_voice,
+              });
+              if (llmResponse.voiceover_script && llmResponse.tts_global_config?.voice_name) {
+                llmResponse.voiceover_script.voice_name = llmResponse.tts_global_config.voice_name;
               }
+              console.log(
+                `[Worker] TTS voice resolved: gender=${llmResponse.tts_global_config.gender}, voice=${llmResponse.tts_global_config.voice_name}`
+              );
             }
-            syncGenderFields(llmResponse);
-            llmResponse.tts_global_config = buildTtsGlobalConfig(llmResponse, {
-              voiceSelectionMode: event.voice_selection_mode || llmResponse.meta?.voice_selection_mode,
-              preferredVoice: event.preferred_voice || llmResponse.meta?.preferred_voice,
-            });
-            if (llmResponse.voiceover_script && llmResponse.tts_global_config?.voice_name) {
-              llmResponse.voiceover_script.voice_name = llmResponse.tts_global_config.voice_name;
-            }
-            console.log(
-              `[Worker] TTS voice resolved: gender=${llmResponse.tts_global_config.gender}, voice=${llmResponse.tts_global_config.voice_name}`
-            );
+
+            finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
+
+            // Update DynamoDB with LLM response
+            const now = getJakartaISOString();
+            await dynamo.send(new UpdateCommand({
+              TableName: USER_REQUEST_TABLE,
+              Key: { uuid: jobId, user_email: userEmail },
+              UpdateExpression: "SET llm_response = :lr, updated_at = :now",
+              ExpressionAttributeValues: { ":lr": llmResponse, ":now": now }
+            }));
+          } catch (e) {
+            console.error("[Worker] Error processing LLM response fields:", e);
           }
+        }
+      } else {
+        console.log(`[Worker] Reusing existing llm_response for job ${jobId}`);
+        finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
+      }
 
-          finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
+      // Preview mode: generate all preview assets using the new helper, then exit
+      if (preview) {
+        console.log(`[Worker] Running in Preview mode. Generating all scene and talent images...`);
+        const { generatePreviewAssets } = require("./core/previewImageHelper");
+        await generatePreviewAssets({
+          jobId,
+          userEmail,
+          userId: event.userId,
+          currentS3ImageUrls,
+          llmResponse,
+          finalJobPrompt,
+          aspectRatio,
+          S3_RESOURCE_BUCKET,
+          dynamo,
+          s3: s3Client,
+          USER_REQUEST_TABLE,
+          requestType,
+          startTime: submissionStartTime
+        });
+        return; // Return early, skipping video workflow and TTS audio generation
+      }
 
-          // Update DynamoDB with LLM response
-          const now = getJakartaISOString();
+      // Video Generation (Upgrade) mode guard: check if preview assets already exist
+      if (isUgcMode || isProductCinematic) {
+        const hasGeneratedScenes = Array.isArray(existingJob.generated_scenes) && existingJob.generated_scenes.length > 0;
+        const hasTalent = (requestType === "UGC-P") ? !!existingJob.generated_image_talent : true;
+        if (!hasGeneratedScenes || !hasTalent) {
+          const errMsg = "Missing generated preview assets (scenes/talent image). Generation aborted to prevent additional cost.";
+          console.error(`[Worker] Error: ${errMsg}`);
           await dynamo.send(new UpdateCommand({
             TableName: USER_REQUEST_TABLE,
             Key: { uuid: jobId, user_email: userEmail },
-            UpdateExpression: "SET llm_response = :lr, updated_at = :now",
-            ExpressionAttributeValues: { ":lr": llmResponse, ":now": now }
+            UpdateExpression: "SET #s = :status, error_message = :err, updated_at = :now",
+            ExpressionAttributeNames: { "#s": "status" },
+            ExpressionAttributeValues: {
+              ":status": "FAILED",
+              ":err": errMsg,
+              ":now": getJakartaISOString()
+            }
           }));
+          return;
+        }
+      }
 
+      if (llmResponse) {
+        try {
           // Trigger Gemini TTS (UGC only)
           let ttsResult = null;
           if (isUgcMode) {
-            const hasTtsScript = !!llmResponse.tts_script;
-            if (hasTtsScript) {
-              const ttsGlobalConfig = llmResponse.tts_global_config || buildTtsGlobalConfig(llmResponse, {
-                voiceSelectionMode: event.voice_selection_mode,
-                preferredVoice: event.preferred_voice,
-              });
-              ttsResult = await generateTTS({
-                jobId,
-                userEmail,
-                userId: event.userId,
-                llmResponse: { ...llmResponse, tts_global_config: ttsGlobalConfig },
-                S3_RESOURCE_BUCKET,
-                dynamo,
-                USER_REQUEST_TABLE,
-                callGeminiAudio,
-                uploadToS3
-              });
+            if (existingJob.audio) {
+              console.log(`[Worker] Reusing existing TTS audio for job ${jobId}: ${existingJob.audio}`);
+              ttsResult = { audioS3Key: existingJob.audio, duration: existingJob.audio_duration };
+            } else {
+              const hasTtsScript = !!llmResponse.tts_script;
+              if (hasTtsScript) {
+                const ttsGlobalConfig = llmResponse.tts_global_config || buildTtsGlobalConfig(llmResponse, {
+                  voiceSelectionMode: event.voice_selection_mode,
+                  preferredVoice: event.preferred_voice,
+                });
+                ttsResult = await generateTTS({
+                  jobId,
+                  userEmail,
+                  userId: event.userId,
+                  llmResponse: { ...llmResponse, tts_global_config: ttsGlobalConfig },
+                  S3_RESOURCE_BUCKET,
+                  dynamo,
+                  USER_REQUEST_TABLE,
+                  callGeminiAudio,
+                  uploadToS3
+                });
+              }
             }
 
             if (!ttsResult || !ttsResult.audioS3Key) {
@@ -301,7 +385,9 @@ const handleSubmission = async (event) => {
                 comfyApiKey,
                 audio: ttsResult?.audioS3Key || null,
                 audioDuration: ttsResult?.duration || null,
-                requestType
+                requestType,
+                preview: preview || false,
+                existingJob
               });
             } else if (isProductCinematic && Array.isArray(llmResponse.scene || llmResponse.scenes) && (llmResponse.scene || llmResponse.scenes).length > 0) {
               // Trigger product cinematic pipeline
@@ -319,7 +405,9 @@ const handleSubmission = async (event) => {
                 s3: s3Client,
                 USER_REQUEST_TABLE,
                 comfyApiKey,
-                requestType
+                requestType,
+                preview: preview || false,
+                existingJob
               });
             } else if (USE_OPENAI_IMAGE_GEN) {
               // Trigger OpenAI Image Generation + Video Generation Pipeline

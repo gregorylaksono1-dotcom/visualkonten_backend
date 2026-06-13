@@ -99,6 +99,7 @@ const invokeComfyUI = async (jobId, jobDetail) => {
   }
 
   const payload = {
+    ...jobDetail,
     jobId,
     userEmail: jobDetail.userEmail || jobDetail.user_email,
     userId: jobDetail.userId || jobDetail.user_id,
@@ -123,7 +124,10 @@ const invokeComfyUI = async (jobId, jobDetail) => {
 
 const resolvePricingRow = async (decodedKey) => {
   if (!PRICING_TABLE_NAME || !decodedKey) return null;
-  const k = String(decodedKey).trim();
+  let k = String(decodedKey).trim();
+  if (k === "PRODUCT-CINEMATIC") {
+    k = "PRODUCT-CINEMATIK";
+  }
   try {
     const getRes = await docClient.send(new GetCommand({
       TableName: PRICING_TABLE_NAME,
@@ -450,8 +454,8 @@ const pickComfyApiKey = async (apiKeysString, redis) => {
   return null;
 };
 
-const COMFY_BASE_URL = "https://cloud.comfy.org";
-// const COMFY_BASE_URL = "http://34.81.97.103:8188";
+// const COMFY_BASE_URL = "https://cloud.comfy.org";
+const COMFY_BASE_URL = "http://35.194.132.28:8188";
 
 const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputImage");
@@ -637,7 +641,7 @@ const queryUserRequestsByEmail = async (email, sinceIso, limit, nextToken) => {
   if (nextToken) {
     try {
       queryParams.ExclusiveStartKey = JSON.parse(Buffer.from(nextToken, "base64").toString());
-    } catch (e) {}
+    } catch (e) { }
   }
 
   const res = await docClient.send(new QueryCommand(queryParams));

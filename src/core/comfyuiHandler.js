@@ -87,7 +87,7 @@ async function processComfyUICompletion(params) {
   // 4. Update DynamoDB
   // For image jobs, we just set generated_image.
   // For video jobs, we set result_url and status = COMPLETED.
-  const updateExpr = isVideo
+  let updateExpr = isVideo
     ? "SET result_url = :res, s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys), #s = :status, updated_at = :now"
     : "SET generated_image = :res, s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys), updated_at = :now";
 
@@ -102,6 +102,13 @@ async function processComfyUICompletion(params) {
   if (isVideo) {
     attrValues[":status"] = "COMPLETED";
     attrNames["#s"] = "status";
+
+    const videoGenStart = job.video_gen_start_at || job.created_at;
+    if (videoGenStart) {
+      const durationSec = Math.round((Date.now() - Date.parse(videoGenStart)) / 1000);
+      updateExpr += ", video_generation_duration = :vgd";
+      attrValues[":vgd"] = durationSec;
+    }
   }
 
   await dynamo.send(new UpdateCommand({

@@ -32,8 +32,8 @@ const { generateProductCinematicPipeline } = require("./core/productCinematikWor
 const { buildTtsGlobalConfig, syncGenderFields } = require("./lib/resolve-voice");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const COMFY_BASE_URL = "http://35.194.132.28:8188";
-// const COMFY_BASE_URL = "http://cloud.comfy.org";
+// const COMFY_BASE_URL = "http://35.194.132.28:8188";
+const COMFY_BASE_URL = "http://cloud.comfy.org";
 const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
 const STATUS_INDEX = process.env.STATUS_CREATED_INDEX_NAME;
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";

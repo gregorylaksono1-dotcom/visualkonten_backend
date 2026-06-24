@@ -67,7 +67,7 @@ async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
   if (USE_FLUX_DEV) {
     modelId = hasReference ? "fal-ai/flux/dev/image-to-image" : "fal-ai/flux/dev";
   } else {
-    modelId = hasReference ? "fal-ai/flux-2/edit" : "fal-ai/flux-2";
+    modelId = hasReference ? "fal-ai/flux-2-pro/edit" : "fal-ai/flux-2-pro";
   }
   const endpoint = `https://fal.run/${modelId}`;
 

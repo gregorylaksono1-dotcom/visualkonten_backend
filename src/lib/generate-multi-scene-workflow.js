@@ -707,7 +707,7 @@ function bypassLtxRewriterInSubgraph(sg) {
 
   for (const rewriter of rewriterNodes) {
     const rewriterId = rewriter.id;
-    const promptInputIdx = Array.isArray(rewriter.inputs) 
+    const promptInputIdx = Array.isArray(rewriter.inputs)
       ? rewriter.inputs.findIndex(inp => inp && inp.name === "prompt")
       : -1;
     if (promptInputIdx === -1) continue;

@@ -454,8 +454,8 @@ const pickComfyApiKey = async (apiKeysString, redis) => {
   return null;
 };
 
-// const COMFY_BASE_URL = "https://cloud.comfy.org";
-const COMFY_BASE_URL = "http://35.194.132.28:8188";
+const COMFY_BASE_URL = "https://cloud.comfy.org";
+// const COMFY_BASE_URL = "http://35.194.132.28:8188";
 
 const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
   if (!apiKey) throw new Error("API Key is required for uploadInputImage");

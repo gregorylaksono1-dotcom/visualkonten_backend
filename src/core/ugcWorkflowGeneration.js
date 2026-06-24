@@ -164,7 +164,7 @@ async function generateMultiScenePipeline(params) {
       upscale: videoQuality === "1080p" ? Math.max(w, h) * 1.2 : Math.max(w, h),
       runpod,
       s3FilenamePrefix,
-      bypassLtxRewriter
+      bypassLtxRewriter,
     });
 
     applyWorkflowAssetFilenames(workflow, {
@@ -220,7 +220,7 @@ async function generateMultiScenePipeline(params) {
       const comfyImageName = sceneImageFilenames[i];
       console.log(`[MultiSceneGen] Uploading Scene ${gs.scene_id} image to ComfyUI Cloud...`);
       const returnedName = await uploadInputImage(imageUrl, comfyImageName, comfyApiKey);
-      
+
       const nodeId = String(2000 + i);
       if (apiPrompt[nodeId] && apiPrompt[nodeId].inputs) {
         apiPrompt[nodeId].inputs.image = returnedName;
@@ -234,7 +234,7 @@ async function generateMultiScenePipeline(params) {
       const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audio });
       const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
       const returnedAudioName = await uploadInputAudio(audioSignedUrl, comfyAudioName, comfyApiKey);
-      
+
       if (apiPrompt["611"] && apiPrompt["611"].inputs) {
         apiPrompt["611"].inputs.audio = returnedAudioName;
         console.log(`[MultiSceneGen] Updated Node 611 input audio to: ${returnedAudioName}`);

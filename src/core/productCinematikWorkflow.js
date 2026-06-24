@@ -5,7 +5,7 @@ const fs = require("fs");
 const { getJakartaISOString } = require("../utils");
 const { getFalAiKey, getSignedUrl, uploadInputImage, submitWorkflow } = require("../services");
 const { graphToApiPrompt } = require("../lib/comfy-graph-to-api-prompt");
-
+const { resolveSceneProducers, buildMergeChain } = require("../lib/pacing");
 const WORKFLOW_NODE_IDS = {
   VHS_COMBINE: 801,
   loadImage: (i) => 2000 + i,
@@ -57,7 +57,7 @@ function bypassLtxRewriterInSubgraph(sg) {
 
   for (const rewriter of rewriterNodes) {
     const rewriterId = rewriter.id;
-    const promptInputIdx = Array.isArray(rewriter.inputs) 
+    const promptInputIdx = Array.isArray(rewriter.inputs)
       ? rewriter.inputs.findIndex(inp => inp && inp.name === "prompt")
       : -1;
     if (promptInputIdx === -1) continue;
@@ -125,7 +125,7 @@ function bypassGemma3LoraInSubgraph(sg) {
 
     const nodeIdx = sg.nodes.indexOf(loraNode);
     if (nodeIdx !== -1) sg.nodes.splice(nodeIdx, 1);
-    
+
     console.log(`[productCinematikWorkflow] Bypassed and removed Gemma-3 LoRA node ${loraId}`);
   }
 }
@@ -281,6 +281,9 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
   const YS = 650;
 
   let nextLink = 3000;
+  const alloc = () => nextLink++;
+
+
   const nodes = [];
   const links_ = [];
 
@@ -316,7 +319,7 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
         { name: "IMAGE", type: "IMAGE", slot_index: 0, links: [lkImg] },
         { name: "MASK", type: "MASK", slot_index: 1, links: [] },
       ],
-      title: `Start Frame — ${scene.title || `Scene ${i+1}`}`,
+      title: `Start Frame — ${scene.title || `Scene ${i + 1}`}`,
       properties: { "Node name for S&R": "LoadImage" },
       widgets_values: [scene.image, "image"],
     });
@@ -384,7 +387,7 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
         { name: "IMAGE_BATCH", type: "IMAGE", slot_index: 0, links: [lkBatch] },
         { name: "AUDIO", type: "AUDIO", slot_index: 1, links: [lkAudio] },
       ],
-      title: `${scene.title || `Scene ${i+1}`} [LTX-2.3]`,
+      title: `${scene.title || `Scene ${i + 1}`} [LTX-2.3]`,
       properties: { proxyWidgets: [], subgraph_id: SUBGRAPH_TYPE },
       widgets_values: {
         value_1: false,
@@ -422,82 +425,15 @@ function buildProductCinematicWorkflow(scenes, options = {}) {
     );
   });
 
-  // Image Merging Loop
-  let lastMergeOutputLink;
-  if (N === 1) {
-    lastMergeOutputLink = sceneImageBatchLinks[0];
-    links_.push({
-      id: lastMergeOutputLink,
-      origin_id: NODE.subgraph(0),
-      origin_slot: 0,
-      target_id: NODE.VHS_COMBINE,
-      target_slot: 0,
-      type: "IMAGE",
-    });
-  } else {
-    for (let j = 0; j < N - 1; j++) {
-      const mergeId = NODE.merge(j);
-      const inputA = j === 0 ? sceneImageBatchLinks[0] : lastMergeOutputLink;
-      const inputB = sceneImageBatchLinks[j + 1];
-      const outputLink = nextLink++;
-      lastMergeOutputLink = outputLink;
-
-      const labelA = j === 0 ? "S1" : `S1…S${j + 1}`;
-      const labelB = `S${j + 2}`;
-
-      nodes.push({
-        id: mergeId,
-        type: "VHS_MergeImages",
-        pos: [XM, YB + j * 180],
-        size: [280, 90],
-        flags: {},
-        order: 10 + N * 5 + j,
-        mode: 0,
-        inputs: [
-          { name: "images_A", type: "IMAGE", link: inputA, slot_index: 0 },
-          { name: "images_B", type: "IMAGE", link: inputB, slot_index: 1 },
-        ],
-        outputs: [
-          { name: "IMAGE", type: "IMAGE", links: [outputLink], slot_index: 0 },
-        ],
-        title: `Merge ${labelA}+${labelB}`,
-        properties: { "Node name for S&R": "VHS_MergeImages" },
-        widgets_values: {
-          merge_strategy: "match A",
-          scale_method: "nearest-exact",
-          crop: "disabled",
-        },
-      });
-
-      links_.push({
-        id: outputLink,
-        origin_id: mergeId,
-        origin_slot: 0,
-        target_id: j < N - 2 ? NODE.merge(j + 1) : NODE.VHS_COMBINE,
-        target_slot: 0,
-        type: "IMAGE",
-      });
-
-      links_.push({
-        id: inputB,
-        origin_id: NODE.subgraph(j + 1),
-        origin_slot: 0,
-        target_id: mergeId,
-        target_slot: 1,
-        type: "IMAGE",
-      });
-      if (j === 0) {
-        links_.push({
-          id: inputA,
-          origin_id: NODE.subgraph(0),
-          origin_slot: 0,
-          target_id: mergeId,
-          target_slot: 0,
-          type: "IMAGE",
-        });
-      }
-    }
-  }
+  const sceneProducers = resolveSceneProducers({
+    scenes, nodes, links: links_, alloc, NODE,
+    resolution, pacing: options.pacing, sceneImageBatchLinks,
+    fps, imageSlot: 0,                 // ← IMAGE_BATCH ada di slot 0 di file ini
+    layout: { YB, YS, XPACE: -900 },
+  });
+  const lastMergeOutputLink = buildMergeChain({
+    sceneProducers, nodes, links: links_, alloc, NODE, layout: { XM, YB },
+  });
 
   // Audio Concatenation Loop
   let lastAudioLink;
@@ -747,7 +683,8 @@ async function generateProductCinematicPipeline(params) {
       width: w,
       height: h,
       fps: 25,
-      bypassLtxRewriter
+      bypassLtxRewriter,
+      pacing: { enabled: true }
     });
 
     applyWorkflowAssetFilenames(workflow, {
@@ -794,7 +731,7 @@ async function generateProductCinematicPipeline(params) {
       const comfyImageName = sceneImageFilenames[i];
       console.log(`[ProductCinematic] Uploading Scene ${gs.scene_id} image to ComfyUI Cloud...`);
       const returnedName = await uploadInputImage(imageUrl, comfyImageName, comfyApiKey);
-      
+
       const nodeId = String(2000 + i);
       if (apiPrompt[nodeId] && apiPrompt[nodeId].inputs) {
         apiPrompt[nodeId].inputs.image = returnedName;

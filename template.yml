@@ -107,6 +107,13 @@ Parameters:
     AllowedValues:
     - 'true'
     - 'false'
+  generationManual:
+    Type: String
+    Description: 'true = manual generation; false = hit comfyui'
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
   ConfigSsmPath:
     Type: String
     Description: SSM Parameter Store path prefix for app secrets (e.g. /visualkonten/prod)
@@ -475,6 +482,8 @@ Resources:
             Ref: MidtransFinishCallbackUrl
           GENERATION_BACKEND:
             Ref: GenerationBackend
+          GENERATION_MANUAL:
+            Ref: generationManual
           COMFYUI_FUNCTION_NAME:
             Ref: ComfyUIWorkerFunction
           FREE_TRIAL_FUNCTION_NAME:
@@ -522,6 +531,20 @@ Resources:
               Ref: Api
             Path: /pricing/{key}
             Method: get
+        ListPricing:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /pricing
+            Method: get
+        LikePricing:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /pricing/{key}/like
+            Method: post
         GetTopupDetail:
           Type: Api
           Properties:

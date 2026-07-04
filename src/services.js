@@ -14,6 +14,7 @@ const {
   ScanCommand,
   GetCommand,
   PutCommand,
+  UpdateCommand,
   TransactWriteCommand,
   BatchGetCommand,
 } = require("@aws-sdk/lib-dynamodb");
@@ -722,6 +723,47 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
   }
 };
 
+const listAllPricingRows = async () => {
+  if (!PRICING_TABLE_NAME) return [];
+  try {
+    const res = await docClient.send(new ScanCommand({
+      TableName: PRICING_TABLE_NAME,
+    }));
+    return res.Items || [];
+  } catch (err) {
+    console.error("listAllPricingRows error:", err.message);
+    return [];
+  }
+};
+
+const incrementPricingPopularity = async (key) => {
+  if (!PRICING_TABLE_NAME || !key) return 0;
+  try {
+    const q = await docClient.send(new QueryCommand({
+      TableName: PRICING_TABLE_NAME,
+      KeyConditionExpression: "#kk = :k",
+      ExpressionAttributeNames: { "#kk": "key" },
+      ExpressionAttributeValues: { ":k": key },
+      Limit: 1,
+    }));
+    const item = q.Items?.[0];
+    if (!item) return 0;
+
+    const updateRes = await docClient.send(new UpdateCommand({
+      TableName: PRICING_TABLE_NAME,
+      Key: { key: key, charge: item.charge },
+      UpdateExpression: "SET popularity = if_not_exists(popularity, :zero) + :inc",
+      ExpressionAttributeValues: { ":inc": 1, ":zero": 0 },
+      ReturnValues: "UPDATED_NEW",
+    }));
+
+    return Number(updateRes.Attributes?.popularity ?? 1);
+  } catch (err) {
+    console.error("incrementPricingPopularity error:", err.message);
+    throw err;
+  }
+};
+
 module.exports = {
   docClient,
   s3Client,
@@ -736,6 +778,8 @@ module.exports = {
   invokeFreeTrialWorker,
   invokeComfyUI,
   resolvePricingRow,
+  listAllPricingRows,
+  incrementPricingPopularity,
   scanUserRequestsForUsage,
   queryCreditHistoryPaged,
   getLatestCreditMetrics,

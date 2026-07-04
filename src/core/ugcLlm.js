@@ -35,6 +35,30 @@ const loadLegacyTemplate = (requestType, storeType) => {
   return fs.readFileSync(path.join(PROMPT_DIR, fileName), "utf-8");
 };
 
+const loadPromptBuilder = async (requestType) => {
+  try {
+    const { resolvePricingRow } = require("../services");
+    const resolved = await resolvePricingRow(requestType);
+    if (resolved && resolved.item && resolved.item.prompt) {
+      const url = String(resolved.item.prompt).trim();
+      if (url.startsWith("http")) {
+        console.log(`[UGC-LLM] Fetching prompt builder from S3 URL for ${requestType}: ${url}`);
+        const response = await fetch(url);
+        if (response.ok) {
+          const content = await response.text();
+          console.log(`[UGC-LLM] Successfully fetched prompt builder from S3 (${content.length} characters)`);
+          return content;
+        } else {
+          console.error(`[UGC-LLM] S3 prompt fetch failed with status ${response.status} for URL ${url}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[UGC-LLM] Error fetching prompt builder from database/S3 for ${requestType}:`, err.message);
+  }
+  return null;
+};
+
 /**
  * @returns {Promise<object>} Pipeline-compatible llm_response object
  */
@@ -59,32 +83,43 @@ const generateUgcLlmResponse = async ({
 
   const opts = { videoDuration, sellingMode, lipSync };
 
+  // Fetch the template from S3 URL in database, fallback to local files if it fails
+  let template = await loadPromptBuilder(requestType);
+
   if (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") {
-    console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading and sending product_ad.md as prompt builder to OpenAI`);
-    const template = fs.readFileSync(path.join(PROMPT_DIR, "product_ad.md"), "utf-8");
+    if (!template) {
+      console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading and sending product_ad.md as prompt builder to OpenAI`);
+      template = fs.readFileSync(path.join(PROMPT_DIR, "product_ad.md"), "utf-8");
+    }
     const userPrompt = `1. {product_description}: ${description}\n2. {video_duration}: ${videoDuration} detik`;
     const aiResponse = await callLLM(template, userPrompt);
     return parseJsonFromLlm(aiResponse);
   }
 
   if (requestType === "FREE-TRIAL") {
-    console.log(`[UGC-LLM] FREE-TRIAL request: Reading and sending ugc_free_trial.md as prompt builder to OpenAI`);
-    const template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_free_trial.md"), "utf-8");
+    if (!template) {
+      console.log(`[UGC-LLM] FREE-TRIAL request: Reading and sending ugc_free_trial.md as prompt builder to OpenAI`);
+      template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_free_trial.md"), "utf-8");
+    }
     const userPrompt = buildLegacyUserPrompt("UGC-P", description, opts);
     const aiResponse = await callLLM(template, userPrompt);
     return parseJsonFromLlm(aiResponse);
   }
 
   if (requestType === "UGC-P") {
-    console.log(`[UGC-LLM] UGC-P request: Reading and sending ugc_slim.md as prompt builder to OpenAI`);
-    const template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_slim.md"), "utf-8");
+    if (!template) {
+      console.log(`[UGC-LLM] UGC-P request: Reading and sending ugc_slim.md as prompt builder to OpenAI`);
+      template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_slim.md"), "utf-8");
+    }
     const userPrompt = buildLegacyUserPrompt(requestType, description, opts);
     const aiResponse = await callLLM(template, userPrompt);
     return parseJsonFromLlm(aiResponse);
   }
 
-  console.log(`[UGC-LLM] legacy monolithic prompt (${requestType})`);
-  const template = loadLegacyTemplate(requestType, storeType);
+  if (!template) {
+    console.log(`[UGC-LLM] legacy monolithic prompt (${requestType})`);
+    template = loadLegacyTemplate(requestType, storeType);
+  }
   const userPrompt = buildLegacyUserPrompt(requestType, description, opts);
   const aiResponse = await callLLM(template, userPrompt);
   return parseJsonFromLlm(aiResponse);

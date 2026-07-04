@@ -206,8 +206,8 @@ const handleSubmission = async (event) => {
   }
 
   // 3. Process Heavy AI Requirements (LLM & Gemini)
-  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S";
-  const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK";
+  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-");
+  const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
 
   if (isUgcMode || isProductCinematic) {
     try {

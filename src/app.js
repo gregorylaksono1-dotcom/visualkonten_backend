@@ -10,7 +10,7 @@ const { handleGetHello } = require("./handlers/hello");
 const { handleGetUser } = require("./handlers/user");
 const { handleGetCredit } = require("./handlers/credit");
 const { handleGetUsage } = require("./handlers/usage");
-const { handleGetPricing } = require("./handlers/pricing");
+const { handleGetPricing, handleListPricing, handleLikePricing } = require("./handlers/pricing");
 const { handleGetTopup, handlePostSnap } = require("./handlers/topup");
 const { handlePostResource } = require("./handlers/resource");
 
@@ -25,6 +25,8 @@ exports.handler = async (event) => {
     if (route === "GET /user") return handleGetUser(event);
     if (route === "GET /credit") return handleGetCredit(event);
     if (route === "GET /usage") return handleGetUsage(event);
+    if (route === "GET /pricing") return handleListPricing(event);
+    if (route.startsWith("POST /pricing/") && route.endsWith("/like")) return handleLikePricing(event, pathParameters.key);
     if (route.startsWith("GET /pricing/")) return handleGetPricing(event, pathParameters.key);
     if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.orderId || pathParameters.order_id);
     if (route === "POST /snap") return handlePostSnap(event);

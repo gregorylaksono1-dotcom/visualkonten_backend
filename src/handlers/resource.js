@@ -1,11 +1,13 @@
 const fs = require("fs");
 const path = require("path");
+const https = require("https");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
 const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction, docClient, GetCommand } = require("../services");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
 const GENERATION_BACKEND = process.env.GENERATION_BACKEND || "comfyui";
+const GENERATION_MANUAL = process.env.GENERATION_MANUAL || "false";
 
 exports.handlePostResource = async (event) => {
   const claims = getClaims(event);
@@ -50,7 +52,8 @@ exports.handlePostResource = async (event) => {
       const videoQuality = requestItem.video_quality || "720p";
       const aspectRatio = requestItem.aspect_ratio || "9:16";
 
-      if ((requestItem.request_type === "UGC-P" || requestItem.request_type === "UGC-S" || requestItem.request_type === "PRODUCT-CINEMATIC" || requestItem.request_type === "PRODUCT-CINEMATIK") && pricing.item.attr) {
+      const requestTypeUpper = String(requestItem.request_type || "").toUpperCase();
+      if ((requestTypeUpper === "UGC-P" || requestTypeUpper === "UGC-S" || requestTypeUpper === "UGC-PRESENTER" || requestTypeUpper.startsWith("UGC-") || requestTypeUpper === "PRODUCT-CINEMATIC" || requestTypeUpper === "PRODUCT-CINEMATIK") && pricing.item.attr) {
         let parsedAttr = null;
         try {
           parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
@@ -83,17 +86,18 @@ exports.handlePostResource = async (event) => {
         preview: 0,
         updated_at: now,
         video_gen_start_at: now,
+        ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
       };
       delete putItem.result_url;
 
       // Handle custom user edits to llm_response (motion prompts, tts scripts)
       if (body.llm_response) {
         console.log(`[resource.js] Received updated llm_response for job ${uuid}`);
-        
+
         // Helper function to compare old and new TTS scripts
         const checkTtsChanged = (oldLlm, newLlm) => {
           if (!oldLlm || !newLlm) return false;
-          
+
           // 1. Compare global tts_script fields
           const oldGlobalTts = oldLlm.tts_script || oldLlm.voiceover_script?.tts_script || "";
           const newGlobalTts = newLlm.tts_script || newLlm.voiceover_script?.tts_script || "";
@@ -150,6 +154,13 @@ exports.handlePostResource = async (event) => {
         preview: false,
       };
 
+      if (GENERATION_MANUAL === "true") {
+        return response(200, {
+          message: "Penyimpanan berhasil. Proses generasi menyesuaikan jam operasional max 8 jam. Cek di menu Histori Kreasi",
+          data: { ...putItem }
+        });
+      }
+
       if (GENERATION_BACKEND === "comfyui") {
         await invokeComfyUI(uuid, jobPayload);
       } else {
@@ -184,14 +195,27 @@ exports.handlePostResource = async (event) => {
     if (isFreeTrialRequested) {
       requestType = "FREE-TRIAL";
       pricingKey = "FREE-TRIAL";
-    } else if (!requestType) requestType = hasImage ? "image-to-video" : "text-to-video";
-    if (!isFreeTrialRequested && requestType === "multi-shot-video") {
+    } else if (!requestType) {
+      requestType = hasImage ? "image-to-video" : "text-to-video";
+    }
+
+    const upperType = String(requestType).toUpperCase();
+    if (!isFreeTrialRequested && (upperType === "UGC-P" || upperType === "UGC-S" || upperType === "UGC-PRESENTER" || upperType.startsWith("UGC-") || upperType === "PRODUCT-CINEMATIC" || upperType === "PRODUCT-CINEMATIK")) {
+      requestType = upperType;
+      pricingKey = (upperType === "PRODUCT-CINEMATIK") ? "PRODUCT-CINEMATIC" : upperType;
+    } else if (!isFreeTrialRequested && requestType === "multi-shot-video") {
       pricingKey = body.ugc_mode === "toko" ? "UGC-S" : "UGC-P";
       requestType = pricingKey;
     } else if (!isFreeTrialRequested && (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK")) {
       pricingKey = "PRODUCT-CINEMATIC";
     } else if (!isFreeTrialRequested) {
-      pricingKey = `${hasImage ? "IMAGE-TO-VIDEO" : "TEXT-TO-VIDEO"}-${videoQuality.replace("p", "")}`;
+      const isGeneric = upperType === "IMAGE-TO-VIDEO" || upperType === "TEXT-TO-VIDEO";
+      if (!isGeneric) {
+        requestType = upperType;
+        pricingKey = upperType;
+      } else {
+        pricingKey = `${hasImage ? "IMAGE-TO-VIDEO" : "TEXT-TO-VIDEO"}-${videoQuality.replace("p", "")}`;
+      }
     }
   } else {
     if (!requestType) requestType = imageBase64_2.trim() ? "image-to-image2" : (imageBase64_1.trim() ? "image-to-image1" : "text-to-image");
@@ -211,7 +235,8 @@ exports.handlePostResource = async (event) => {
   if (!pricing) return response(404, { error: `Pricing not found for ${pricingKey}.` });
 
   let finalAmount = pricing.amount;
-  if ((isPreview || requestType === "UGC-P" || requestType === "UGC-S" || requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") && pricing.item.attr) {
+  const requestTypeUpperVal = String(requestType || "").toUpperCase();
+  if ((isPreview || requestTypeUpperVal === "UGC-P" || requestTypeUpperVal === "UGC-S" || requestTypeUpperVal === "UGC-PRESENTER" || requestTypeUpperVal.startsWith("UGC-") || requestTypeUpperVal === "PRODUCT-CINEMATIC" || requestTypeUpperVal === "PRODUCT-CINEMATIK") && pricing.item.attr) {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
@@ -275,6 +300,7 @@ exports.handlePostResource = async (event) => {
     free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
     preview: isPreview ? 1 : 0,
     video_gen_start_at: isPreview ? null : now,
+    ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
   };
 
   const errRes = await executeResourceRequestTransaction({
@@ -285,6 +311,9 @@ exports.handlePostResource = async (event) => {
     now
   });
   if (errRes) return errRes;
+
+  // Send telegram notification asynchronously
+  sendTelegramAlert(requestId, requestType, prompt, s3ImageUrls);
 
   const jobPayload = {
     jobId: requestId,
@@ -305,6 +334,13 @@ exports.handlePostResource = async (event) => {
     lip_sync: requestType === "FREE-TRIAL" ? false : true,
     preview: isPreview,
   };
+
+  if (GENERATION_MANUAL === "true") {
+    return response(200, {
+      message: "Penyimpanan berhasil. Proses generasi menyesuaikan jam operasional max 8 jam. Cek di menu Histori Kreasi",
+      data: { ...putItem }
+    });
+  }
 
   try {
     if (requestType === "FREE-TRIAL") {
@@ -345,3 +381,30 @@ exports.handleGetPresigned = async (event) => {
     return response(500, { error: "Failed to generate presigned URL." });
   }
 };
+
+function sendTelegramAlert(requestId, requestType, prompt, imageUrls = []) {
+  const token = "8611691550:AAF5omYCHcqn7-bulHn3HQPJ6b4-mWOLObU";
+  const chatId = "7989331780";
+  
+  const text = `🔔 USER REQUEST BARU MASUK!
+
+ID Request: ${requestId}
+Tipe Request: ${requestType}
+Deskripsi: ${prompt}
+
+Gambar:
+${imageUrls.length > 0 ? imageUrls.join("\n\n") : "-"}`;
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}`;
+
+  https.get(url, (res) => {
+    let data = "";
+    res.on("data", (chunk) => { data += chunk; });
+    res.on("end", () => {
+      console.log("Telegram notification sent. Response:", data);
+    });
+  }).on("error", (err) => {
+    console.error("Telegram notification failed:", err.message);
+  });
+}
+

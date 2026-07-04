@@ -265,6 +265,17 @@ function buildLtxPromptFields(scene) {
     if (talkvid) {
       prompt = prompt.replace(SUBTLE_LIP_RE, SUBTLE_LIP_REPLACEMENT);
       prompt = normalizeExplicitSpeech(prompt, true);
+
+      if (scene.lip_sync_segment) {
+        const segment = String(scene.lip_sync_segment).trim();
+        if (segment && !prompt.includes('"')) {
+          if (/\bspeaks?\b/i.test(prompt)) {
+            prompt = prompt.replace(/\bspeaks?\b/gi, `speaks "${segment}"`);
+          } else {
+            prompt = prompt.replace(/\.?$/, `, and speaks "${segment}".`);
+          }
+        }
+      }
     } else {
       prompt = prompt.replace(SUBTLE_LIP_RE, "");
       prompt = normalizeExplicitSpeech(prompt, false);

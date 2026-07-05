@@ -86,6 +86,8 @@ const generateUgcLlmResponse = async ({
   // Fetch the template from S3 URL in database, fallback to local files if it fails
   let template = await loadPromptBuilder(requestType);
 
+  console.log(`[PIPELINE_LOG] [LLM] Calling LLM API for request type: ${requestType}`);
+
   if (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") {
     if (!template) {
       console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading and sending product_ad.md as prompt builder to OpenAI`);

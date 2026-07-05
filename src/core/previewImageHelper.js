@@ -88,6 +88,7 @@ async function generatePreviewAssets(params) {
 
   if (isUgcMode && requestType !== "FREE-TRIAL") {
     const talentPrompt = buildTalentPortraitPrompt(llmResponse);
+    console.log(`[PIPELINE_LOG] [IMAGE_LOCK] Generating lock image for: talent`);
     console.log(`[PreviewHelper] Generating talent image with prompt: "${talentPrompt.slice(0, 60)}..."`);
     const { buffer: talentBuffer, fallbackUrl: talentFallbackUrl } = await callOpenAIImageEdit({
       apiKey,

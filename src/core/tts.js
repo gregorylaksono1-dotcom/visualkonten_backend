@@ -44,6 +44,7 @@ async function generateTTS(params) {
   } = params;
 
   try {
+    console.log(`[PIPELINE_LOG] [GEMINI_TTS] Triggering Gemini Multimodal TTS for script: "${(llmResponse.tts_script || "").slice(0, 100)}..."`);
     const audioBase64 = await callGeminiAudio(llmResponse.tts_script, llmResponse.tts_global_config);
     if (audioBase64) {
       const pcmBuffer = Buffer.from(audioBase64, "base64");

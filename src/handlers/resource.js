@@ -16,7 +16,7 @@ exports.handlePostResource = async (event) => {
   if (!userEmail || !userId) return response(401, { error: "Unauthorized." });
 
   const body = parseBody(event);
-
+  console.log("action", body.action);
   if (body.action === "generate_video") {
     const uuid = body.uuid;
     if (!uuid) return response(400, { error: "uuid is required for generate_video action." });
@@ -312,9 +312,6 @@ exports.handlePostResource = async (event) => {
   });
   if (errRes) return errRes;
 
-  // Send telegram notification asynchronously
-  sendTelegramAlert(requestId, requestType, prompt, s3ImageUrls);
-
   const jobPayload = {
     jobId: requestId,
     userEmail,
@@ -382,29 +379,4 @@ exports.handleGetPresigned = async (event) => {
   }
 };
 
-function sendTelegramAlert(requestId, requestType, prompt, imageUrls = []) {
-  const token = "8611691550:AAF5omYCHcqn7-bulHn3HQPJ6b4-mWOLObU";
-  const chatId = "7989331780";
-  
-  const text = `🔔 USER REQUEST BARU MASUK!
-
-ID Request: ${requestId}
-Tipe Request: ${requestType}
-Deskripsi: ${prompt}
-
-Gambar:
-${imageUrls.length > 0 ? imageUrls.join("\n\n") : "-"}`;
-
-  const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(text)}`;
-
-  https.get(url, (res) => {
-    let data = "";
-    res.on("data", (chunk) => { data += chunk; });
-    res.on("end", () => {
-      console.log("Telegram notification sent. Response:", data);
-    });
-  }).on("error", (err) => {
-    console.error("Telegram notification failed:", err.message);
-  });
-}
 

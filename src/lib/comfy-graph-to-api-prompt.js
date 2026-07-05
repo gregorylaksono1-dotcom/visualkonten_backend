@@ -5,13 +5,28 @@
  * into API prompt dict. This expands subgraph nodes so Comfy /prompt can run
  * without relying on subgraph UUID class types being registered as node types.
  */
+function normalizeLink(lk) {
+  if (Array.isArray(lk)) {
+    return {
+      id: lk[0],
+      origin_id: lk[1],
+      origin_slot: lk[2],
+      target_id: lk[3],
+      target_slot: lk[4],
+      type: lk[5]
+    };
+  }
+  return lk;
+}
+
 function graphToApiPrompt(workflowGraph, options = {}) {
   if (!workflowGraph || !Array.isArray(workflowGraph.nodes) || !Array.isArray(workflowGraph.links)) {
     throw new Error("Workflow graph tidak valid: butuh fields nodes[] dan links[].");
   }
 
   const outerLinkById = new Map();
-  for (const lk of workflowGraph.links) {
+  for (const rawLk of workflowGraph.links) {
+    const lk = normalizeLink(rawLk);
     if (!lk || lk.id == null) continue;
     outerLinkById.set(Number(lk.id), lk);
   }
@@ -63,7 +78,8 @@ function graphToApiPrompt(workflowGraph, options = {}) {
         outerNodeById
       );
       if (!lk) {
-        throw new Error(`Link ${linkId} tidak ditemukan untuk node ${nodeId}.`);
+        console.warn(`[graphToApiPrompt] Link ${linkId} not found for node ${nodeId}, skipping.`);
+        return null;
       }
       const subOutKey = `${String(lk.origin_id)}:${Number(lk.origin_slot ?? 0)}`;
       const remap = subgraphOutputRefs.get(subOutKey);
@@ -113,7 +129,8 @@ function expandSubgraphNode({
     : (subgraphDef.state?.nodes || []);
 
   const sgLinkById = new Map();
-  for (const lk of sgLinks) {
+  for (const rawLk of sgLinks) {
+    const lk = normalizeLink(rawLk);
     if (lk?.id != null) sgLinkById.set(Number(lk.id), lk);
   }
   const sgNodeById = new Map(
@@ -502,7 +519,20 @@ const WIDGET_INPUT_KEYS_BY_TYPE = {
   EmptyLTXVLatentVideo: ["width", "height", "length", "batch_size"],
   VAEDecodeTiled: ["tile_size", "overlap", "temporal_size", "temporal_overlap"],
   SaveVideoFilesS3: ["filename_prefix"],
+  SaveVideo: ["filename_prefix", "format", "codec"],
   LTXVEmptyLatentAudio: ["frames_number", "frame_rate", "batch_size"],
+  ByteDanceImageToVideoNode: [
+    "model",
+    "prompt",
+    "resolution",
+    "aspect_ratio",
+    "duration",
+    "seed",
+    "control_after_generate",
+    "camera_fixed",
+    "watermark",
+    "generate_audio"
+  ],
 };
 
 module.exports = { graphToApiPrompt };

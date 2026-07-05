@@ -51,7 +51,7 @@ function normalizeFalApiKey(apiKey) {
   return key;
 }
 
-const USE_FLUX_DEV = false; //true
+const USE_FLUX_DEV = true; //true
 
 async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
   const { getFalAiKey } = require("../services");

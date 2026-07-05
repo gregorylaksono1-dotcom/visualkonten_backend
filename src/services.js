@@ -135,6 +135,7 @@ const resolvePricingRow = async (decodedKey) => {
       Key: { key: k, charge: "default" },
     }));
     if (getRes.Item) {
+      console.log("dapet item:", getRes.Item);
       const n = parseCreditsFromPricingItem(getRes.Item);
       if (Number.isFinite(n) && n > 0) return { amount: n, item: getRes.Item };
     }
@@ -148,6 +149,7 @@ const resolvePricingRow = async (decodedKey) => {
     const item = q.Items?.[0];
     if (!item) return null;
     const n = parseCreditsFromPricingItem(item);
+    console.log("dapet item 2:", item);
     if (!Number.isFinite(n) || n <= 0) return null;
     return { amount: n, item };
   } catch (err) {
@@ -736,6 +738,40 @@ const listAllPricingRows = async () => {
   }
 };
 
+/**
+ * Retrieve a pricing item (raw) by key. Used as a fallback when the prompt field is needed without
+ * parsing credits. It attempts a direct Get on {key, charge:"default"} and, if not found, falls back
+ * to a query on the partition key `key`.
+ */
+const findPricingItem = async (key) => {
+  console.log("dapet key:", key, ". Di table ", PRICING_TABLE_NAME);
+
+  if (!PRICING_TABLE_NAME || !key) return null;
+  const k = String(key).trim();
+  try {
+    // Try direct get with composite key
+    const getRes = await docClient.send(new GetCommand({
+      TableName: PRICING_TABLE_NAME,
+      Key: { key: k, charge: "default" },
+    }));
+    console.log("Res item adalah:", getRes.Item);
+    if (getRes.Item) return getRes.Item;
+    // Fallback: query by key only
+    const q = await docClient.send(new QueryCommand({
+      TableName: PRICING_TABLE_NAME,
+      KeyConditionExpression: "#kk = :k",
+      ExpressionAttributeNames: { "#kk": "key" },
+      ExpressionAttributeValues: { ":k": k },
+      Limit: 1,
+    }));
+    console.log("q item adalah:", q);
+    return q.Items?.[0] || null;
+  } catch (err) {
+    console.error("findPricingItem error:", err.message);
+    return null;
+  }
+};
+
 const incrementPricingPopularity = async (key) => {
   if (!PRICING_TABLE_NAME || !key) return 0;
   try {
@@ -779,6 +815,7 @@ module.exports = {
   invokeComfyUI,
   resolvePricingRow,
   listAllPricingRows,
+  findPricingItem,
   incrementPricingPopularity,
   scanUserRequestsForUsage,
   queryCreditHistoryPaged,
@@ -807,4 +844,3 @@ module.exports = {
   createTopupOrder,
   executeResourceRequestTransaction
 };
-

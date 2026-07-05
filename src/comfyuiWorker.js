@@ -205,6 +205,32 @@ const handleSubmission = async (event) => {
     console.error("[Worker] Error fetching existing request:", err.message);
   }
 
+  // ─── Key Routing for Custom Handlers ──────────────────────────────────────────
+  if (requestType === "TESTIMONY_TULUS") {
+    console.log(`[Worker] Routing job ${jobId} with key ${requestType} to testimonyPresenter`);
+    try {
+      const { handleTestimonyTulus } = require("./prompt/testimonyPresenter");
+      await handleTestimonyTulus({
+        jobId,
+        userEmail,
+        userId: event.userId,
+        currentS3ImageUrls,
+        prompt,
+        videoQuality,
+        aspectRatio,
+        S3_RESOURCE_BUCKET,
+        dynamo,
+        s3: s3Client,
+        USER_REQUEST_TABLE,
+        preview: preview || false,
+        existingJob
+      });
+    } catch (err) {
+      console.error(`[Worker] Error executing testimony presenter for job ${jobId}:`, err);
+    }
+    return;
+  }
+
   // 3. Process Heavy AI Requirements (LLM & Gemini)
   const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-");
   const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
@@ -294,25 +320,56 @@ const handleSubmission = async (event) => {
         return; // Return early, skipping video workflow and TTS audio generation
       }
 
-      // Video Generation (Upgrade) mode guard: check if preview assets already exist
+      // Video Generation (Upgrade) mode guard: check if preview assets already exist.
+      // If missing, automatically generate them first to allow direct video generation bypassing the manual draft step.
       if (isUgcMode || isProductCinematic) {
         const hasGeneratedScenes = Array.isArray(existingJob.generated_scenes) && existingJob.generated_scenes.length > 0;
         const hasTalent = (requestType === "UGC-P") ? !!existingJob.generated_image_talent : true;
         if (!hasGeneratedScenes || !hasTalent) {
-          const errMsg = "Missing generated preview assets (scenes/talent image). Generation aborted to prevent additional cost.";
-          console.error(`[Worker] Error: ${errMsg}`);
-          await dynamo.send(new UpdateCommand({
-            TableName: USER_REQUEST_TABLE,
-            Key: { uuid: jobId, user_email: userEmail },
-            UpdateExpression: "SET #s = :status, error_message = :err, updated_at = :now",
-            ExpressionAttributeNames: { "#s": "status" },
-            ExpressionAttributeValues: {
-              ":status": "FAILED",
-              ":err": errMsg,
-              ":now": getJakartaISOString()
+          console.log(`[Worker] Preview assets missing for job ${jobId}. Automatically generating preview assets first...`);
+          const { generatePreviewAssets } = require("./core/previewImageHelper");
+          try {
+            await generatePreviewAssets({
+              jobId,
+              userEmail,
+              userId: event.userId,
+              currentS3ImageUrls,
+              llmResponse,
+              finalJobPrompt,
+              aspectRatio,
+              S3_RESOURCE_BUCKET,
+              dynamo,
+              s3: s3Client,
+              USER_REQUEST_TABLE,
+              requestType,
+              startTime: submissionStartTime
+            });
+
+            // Reload the job to get the generated preview assets
+            const getRes = await dynamo.send(new GetCommand({
+              TableName: USER_REQUEST_TABLE,
+              Key: { uuid: jobId, user_email: userEmail }
+            }));
+            if (getRes.Item) {
+              existingJob = getRes.Item;
+              console.log(`[Worker] Auto-generated preview assets successfully. Reloaded job data.`);
             }
-          }));
-          return;
+          } catch (pErr) {
+            const errMsg = `Failed to generate preview assets automatically: ${pErr.message}`;
+            console.error(`[Worker] Error: ${errMsg}`, pErr);
+            await dynamo.send(new UpdateCommand({
+              TableName: USER_REQUEST_TABLE,
+              Key: { uuid: jobId, user_email: userEmail },
+              UpdateExpression: "SET #s = :status, error_message = :err, updated_at = :now",
+              ExpressionAttributeNames: { "#s": "status" },
+              ExpressionAttributeValues: {
+                ":status": "FAILED",
+                ":err": errMsg,
+                ":now": getJakartaISOString()
+              }
+            }));
+            return;
+          }
         }
       }
 

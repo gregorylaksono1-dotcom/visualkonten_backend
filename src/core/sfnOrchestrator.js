@@ -1,0 +1,603 @@
+"use strict";
+
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, QueryCommand, UpdateCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
+const { SFNClient, StartExecutionCommand, RedriveExecutionCommand } = require("@aws-sdk/client-sfn");
+const { getSecrets, getConfig } = require("../lib/config");
+const { getKieAiKey, s3Client, getSignedUrl } = require("../services");
+const { GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getJakartaISOString } = require("../utils");
+const { exec } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+
+const REGION = process.env.AWS_REGION || "ap-southeast-1";
+const USER_REQUEST_TABLE = process.env.USER_REQUEST_TABLE_NAME;
+const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+const STATE_MACHINE_ARN = process.env.STATE_MACHINE_ARN;
+
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
+const sfnClient = new SFNClient({ region: REGION });
+
+/**
+ * Triggers the AWS Step Functions State Machine for a given job.
+ */
+async function triggerStateMachine({
+  jobId,
+  userEmail,
+  userId,
+  currentS3ImageUrls,
+  llmResponse,
+  finalJobPrompt,
+  aspectRatio,
+  requestType,
+  audio,
+  audio_duration
+}) {
+  if (!STATE_MACHINE_ARN) {
+    throw new Error("STATE_MACHINE_ARN environment variable is not set.");
+  }
+
+  const executionInput = {
+    jobId,
+    userEmail,
+    userId: userId || "anonymous",
+    currentS3ImageUrls: Array.isArray(currentS3ImageUrls) ? currentS3ImageUrls : [],
+    llmResponse,
+    finalJobPrompt,
+    aspectRatio: aspectRatio || "9:16",
+    requestType,
+    audio: audio || null,
+    audio_duration: audio_duration || null
+  };
+
+  console.log(`[SFN Orchestrator] Starting Step Function execution for Job ${jobId}`);
+  const sfnResult = await sfnClient.send(new StartExecutionCommand({
+    stateMachineArn: STATE_MACHINE_ARN,
+    name: `${jobId}-${Date.now()}`,
+    input: JSON.stringify(executionInput)
+  }));
+
+  // Store the execution ARN and set status to PROCESSING in DynamoDB
+  await dynamo.send(new UpdateCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { uuid: jobId, user_email: userEmail },
+    UpdateExpression: "SET #s = :status, sfn_execution_arn = :arn, updated_at = :now",
+    ExpressionAttributeNames: { "#s": "status" },
+    ExpressionAttributeValues: {
+      ":status": "PROCESSING",
+      ":arn": sfnResult.executionArn,
+      ":now": getJakartaISOString()
+    }
+  }));
+
+  console.log(`[SFN Orchestrator] Successfully triggered Step Function. ARN: ${sfnResult.executionArn}`);
+  return sfnResult.executionArn;
+}
+
+/**
+ * Trigger manual redrive of a failed Step Function execution.
+ */
+async function triggerManualRedrive(executionArn) {
+  console.log(`[SFN Orchestrator] Pemicuan ulang (Redrive) eksekusi SFN: ${executionArn}`);
+  try {
+    const res = await sfnClient.send(new RedriveExecutionCommand({
+      executionArn: executionArn
+    }));
+    return { success: true, redriveExecutionArn: res.redriveExecutionArn };
+  } catch (err) {
+    console.error(`[SFN Orchestrator] Redrive failed:`, err.message);
+    throw err;
+  }
+}
+
+/**
+ * Helper to extract S3 Key.
+ */
+function extractS3Key(urlOrKey) {
+  if (!urlOrKey) return "";
+  const trimmed = urlOrKey.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      const parsed = new URL(trimmed);
+      const host = parsed.hostname;
+      if (host.includes(".s3.")) {
+        return decodeURIComponent(parsed.pathname.substring(1));
+      } else if (host === "s3.amazonaws.com" || host.startsWith("s3-") || host.startsWith("s3.")) {
+        const parts = parsed.pathname.substring(1).split("/");
+        return decodeURIComponent(parts.slice(1).join("/"));
+      }
+    } catch (e) {
+      console.warn(`[SFN Orchestrator] Failed to parse S3 URL: ${trimmed}`, e.message);
+    }
+  }
+  return decodeURIComponent(trimmed);
+}
+
+/**
+ * Task: Prepare Job Data.
+ * Parses the locks and scenes structure and returns lists for Map states.
+ */
+async function prepareJobData(payload) {
+  const { jobId, userEmail, userId, currentS3ImageUrls, llmResponse, finalJobPrompt, aspectRatio, requestType, audio, audio_duration } = payload.data;
+
+  console.log(`[SFN Orchestrator] Preparing job data for ${jobId}`);
+
+  // 1. Build locks
+  const locks = [];
+  const currentUrls = Array.isArray(currentS3ImageUrls) ? currentS3ImageUrls : [];
+
+  if (llmResponse.locks && typeof llmResponse.locks === "object") {
+    for (const [id, lockData] of Object.entries(llmResponse.locks)) {
+      if (lockData.type === "provided_reference") {
+        const imageRef = lockData.image || "P1";
+        const idx = parseInt(imageRef.replace("P", ""), 10) - 1;
+        const s3key = currentUrls[idx] || currentUrls[0] || "";
+        locks.push({
+          id,
+          prompt: "",
+          negative_prompt: "",
+          s3key,
+          isImageFinished: true,
+          taskId: ""
+        });
+      } else if (lockData.type === "generated_reference") {
+        locks.push({
+          id,
+          prompt: lockData.image_prompt || "",
+          negative_prompt: lockData.negative_image_prompt || "",
+          s3key: "",
+          isImageFinished: false,
+          taskId: ""
+        });
+      }
+    }
+  } else {
+    // Fallback to legacy structure
+    const ig = llmResponse.image_generation || {};
+    if (ig.talent_frame?.prompt) locks.push({ id: "talent", prompt: ig.talent_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    if (ig.product_frame?.prompt) locks.push({ id: "product", prompt: ig.product_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    if (ig.hero_frame?.prompt) locks.push({ id: "hero", prompt: ig.hero_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    if (ig.transition_frame?.prompt) locks.push({ id: "transition", prompt: ig.transition_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    if (ig.reveal_start_frame?.prompt) locks.push({ id: "reveal", prompt: ig.reveal_start_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+  }
+
+  // 2. Build scenes
+  let rawScenes = llmResponse.scenes || llmResponse.scene || [];
+  if (!Array.isArray(rawScenes)) rawScenes = [];
+  const scenes = rawScenes.map((s, i) => {
+    const sceneId = s.scene_id || (i + 1);
+    const dependency = Array.isArray(s.dependency) ? s.dependency : locks.map(l => l.id);
+    return {
+      scene_id: sceneId,
+      prompt_image: s.image_prompt || s.prompt || finalJobPrompt,
+      negative_prompt_image: s.negative_image_prompt || s.negative_prompt || "",
+      duration_seconds: Number(s.duration || s.duration_seconds || 5),
+      dependency: dependency,
+      video_prompt: s.video_prompt || s.ltx_prompt || s.motion_prompt || "Cinematic panning shot.",
+      isImageFinished: false,
+      isVideoSceneFinished: false,
+      imageTaskId: "",
+      videoTaskId: "",
+      talkvid: s.talkvid !== false
+    };
+  });
+
+  if (scenes.length === 0) {
+    scenes.push({
+      scene_id: 1,
+      prompt_image: finalJobPrompt,
+      negative_prompt_image: "",
+      duration_seconds: 5,
+      dependency: [],
+      video_prompt: finalJobPrompt,
+      isImageFinished: false,
+      isVideoSceneFinished: false,
+      imageTaskId: "",
+      videoTaskId: "",
+      talkvid: false
+    });
+  }
+
+  return {
+    jobId,
+    userEmail,
+    userId,
+    locks,
+    scenes,
+    audio: audio || null,
+    audio_duration: audio_duration || null,
+    aspect_ratio: aspectRatio || "9:16",
+    request_type: requestType,
+    llm_response: llmResponse
+  };
+}
+
+/**
+ * Task: Submit Lock Image.
+ * Generates an image or returns success if it is already finished (e.g. references).
+ */
+async function submitLockImage(payload) {
+  const { jobId, lock, userEmail, userId, taskToken } = payload;
+
+  console.log(`[SFN Orchestrator] submitLockImage for jobId ${jobId}, lock id ${lock.id}`);
+
+  if (lock.isImageFinished && lock.s3key) {
+    console.log(`[SFN Orchestrator] Lock ${lock.id} already finished. Continuing immediately.`);
+    // Let's resolve the task success immediately
+    const { SendTaskSuccessCommand } = require("@aws-sdk/client-sfn");
+    await sfnClient.send(new SendTaskSuccessCommand({
+      taskToken,
+      output: JSON.stringify({ s3key: lock.s3key, id: lock.id, isImageFinished: true })
+    }));
+    return;
+  }
+
+  // Generate Lock image via Kie.ai
+  const { submitKieImageTask } = require("./stateMachine");
+  const config = await getConfig();
+  const callbackBase = config.callback_result || `${config.api_gateway_url}/comfyui-webhook`;
+  const kieApiKey = await getKieAiKey();
+
+  const taskId = await submitKieImageTask({
+    jobId,
+    id: lock.id,
+    type: "lock",
+    prompt: lock.prompt,
+    negativePrompt: lock.negative_prompt,
+    referenceUrls: [],
+    callbackBase,
+    kieApiKey,
+    taskToken
+  });
+
+  console.log(`[SFN Orchestrator] Lock Image Task ${taskId} created for lock ${lock.id}`);
+}
+
+/**
+ * Task: Submit Scene Image.
+ */
+async function submitSceneImage(payload) {
+  const { jobId, scene, userEmail, userId, lockResults, taskToken } = payload;
+
+  console.log(`[SFN Orchestrator] submitSceneImage for jobId ${jobId}, scene id ${scene.scene_id}`);
+
+  // Resolve dependencies signed S3 URLs
+  const referenceUrls = [];
+  const dependencies = Array.isArray(scene.dependency) ? scene.dependency : [];
+  
+  for (const depId of dependencies) {
+    const lockResult = Array.isArray(lockResults) ? lockResults.find(r => {
+      if (!r) return false;
+      const parsed = typeof r === "string" ? JSON.parse(r) : r;
+      return parsed.id === depId;
+    }) : null;
+    if (lockResult) {
+      const parsedRes = typeof lockResult === "string" ? JSON.parse(lockResult) : lockResult;
+      if (parsedRes.s3key) {
+        const key = extractS3Key(parsedRes.s3key);
+        const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
+        const signed = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+        referenceUrls.push(signed);
+      }
+    }
+  }
+
+  const { submitKieImageTask } = require("./stateMachine");
+  const config = await getConfig();
+  const callbackBase = config.callback_result || `${config.api_gateway_url}/comfyui-webhook`;
+  const kieApiKey = await getKieAiKey();
+
+  const taskId = await submitKieImageTask({
+    jobId,
+    id: scene.scene_id,
+    type: "imagesScene",
+    prompt: scene.prompt_image,
+    negativePrompt: scene.negative_prompt_image,
+    referenceUrls,
+    callbackBase,
+    kieApiKey,
+    taskToken
+  });
+
+  console.log(`[SFN Orchestrator] Scene Image Task ${taskId} created for scene ${scene.scene_id}`);
+}
+
+/**
+ * Task: Submit Scene Video.
+ */
+async function submitSceneVideo(payload) {
+  const { jobId, scene, userEmail, userId, sceneImageResults, audio, audio_duration, aspect_ratio, request_type, llm_response, taskToken } = payload;
+
+  console.log(`[SFN Orchestrator] submitSceneVideo for jobId ${jobId}, scene id ${scene.scene_id}`);
+
+  // Find the generated image result for this scene
+  const sceneImgResult = Array.isArray(sceneImageResults) ? sceneImageResults.find(r => {
+    if (!r) return false;
+    const parsed = typeof r === "string" ? JSON.parse(r) : r;
+    return String(parsed.id) === String(scene.scene_id);
+  }) : null;
+  if (!sceneImgResult) {
+    throw new Error(`Starting frame image result not found for scene ${scene.scene_id}`);
+  }
+  const parsedImgRes = typeof sceneImgResult === "string" ? JSON.parse(sceneImgResult) : sceneImgResult;
+
+  // Resolve signed S3 URL of the starting frame image
+  const key = extractS3Key(parsedImgRes.s3key);
+  const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
+  const signedSceneImgUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+
+  const { generateComfyUIVideo } = require("./videoGeneration");
+  const talkvid = scene.talkvid !== false;
+
+  const taskId = await generateComfyUIVideo({
+    uuid: jobId,
+    user_email: userEmail,
+    user_id: userId,
+    request_type,
+    llm_response,
+    audio,
+    audio_duration,
+    aspect_ratio,
+    imageResultUrl: signedSceneImgUrl,
+    dynamo,
+    USER_REQUEST_TABLE,
+    S3_RESOURCE_BUCKET,
+    prompt: scene.video_prompt,
+    sceneId: scene.scene_id,
+    duration: scene.duration_seconds || scene.duration || 5,
+    talkvid,
+    taskToken
+  });
+
+  console.log(`[SFN Orchestrator] Video Scene Task ${taskId} created for scene ${scene.scene_id}`);
+}
+
+/**
+ * Helper to ensure static FFmpeg.
+ */
+async function ensureFfmpegBinary() {
+  const localFfmpegPath = "/tmp/ffmpeg";
+  if (fs.existsSync(localFfmpegPath)) {
+    return localFfmpegPath;
+  }
+  console.log(`[FFmpeg] FFmpeg binary not found in /tmp. Downloading from user S3 bucket...`);
+  const url = "https://gambr-public.s3.ap-southeast-1.amazonaws.com/library/ffmpeg-linux-x64";
+  let resp = await fetch(url);
+  if (!resp.ok) {
+    const regionalUrl = "https://s3.ap-southeast-1.amazonaws.com/gambr-public/library/ffmpeg-linux-x64";
+    resp = await fetch(regionalUrl);
+  }
+  if (!resp.ok) {
+    throw new Error(`Failed to download static FFmpeg from S3: ${resp.status}`);
+  }
+  fs.writeFileSync(localFfmpegPath, Buffer.from(await resp.arrayBuffer()));
+  fs.chmodSync(localFfmpegPath, "755");
+  return localFfmpegPath;
+}
+
+async function sanitizeAndStandardizeAudio(localVideoPath, ffmpegPath) {
+  const { execSync } = require("child_process");
+  let hasAudio = false;
+  try {
+    const probeCmd = `${ffmpegPath} -i ${localVideoPath} 2>&1`;
+    const output = execSync(probeCmd).toString();
+    if (output.includes("Audio:")) {
+      hasAudio = true;
+    }
+  } catch (e) {
+    const output = e.output ? e.output.toString() : e.message;
+    if (output.includes("Audio:")) {
+      hasAudio = true;
+    }
+  }
+
+  const sanitizedPath = localVideoPath + ".sanitized.mp4";
+
+  if (!hasAudio) {
+    console.log(`[SFN Orchestrator Merge] Video ${localVideoPath} has no audio. Adding silent audio track.`);
+    // Add silent stereo 44.1kHz AAC audio track of the exact video duration
+    const addSilenceCmd = `${ffmpegPath} -y -i ${localVideoPath} -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v copy -c:a aac -shortest ${sanitizedPath}`;
+    execSync(addSilenceCmd);
+    fs.renameSync(sanitizedPath, localVideoPath);
+  } else {
+    console.log(`[SFN Orchestrator Merge] Video ${localVideoPath} has audio. Standardizing audio format.`);
+    // Standardize existing audio stream to stereo, 44100Hz, aac to prevent concat shift/drift bugs
+    const standardizeCmd = `${ffmpegPath} -y -i ${localVideoPath} -c:v copy -c:a aac -ac 2 -ar 44100 ${sanitizedPath}`;
+    try {
+      execSync(standardizeCmd);
+      fs.renameSync(sanitizedPath, localVideoPath);
+    } catch (err) {
+      console.warn(`[SFN Orchestrator Merge] Standardizing audio failed for ${localVideoPath}: ${err.message}. Using original.`);
+      if (fs.existsSync(sanitizedPath)) {
+        try { fs.unlinkSync(sanitizedPath); } catch {}
+      }
+    }
+  }
+}
+
+/**
+ * Task: Merge Video Scenes.
+ */
+async function mergeVideoScenes(payload) {
+  const { jobId, userEmail, userId, videoSceneResults, audio, llm_response, request_type } = payload;
+
+  console.log(`[SFN Orchestrator] mergeVideoScenes for jobId ${jobId}`);
+
+  // Fetch job metadata for duration logging
+  const jobGet = await dynamo.send(new GetCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { uuid: jobId, user_email: userEmail }
+  }));
+  const job = jobGet.Item || {};
+
+  const tmpDir = "/tmp";
+  const inputPaths = [];
+  const videoScenes = [];
+  const ffmpegCmd = await ensureFfmpegBinary();
+
+  try {
+    for (let i = 0; i < videoSceneResults.length; i++) {
+      const resultStr = videoSceneResults[i];
+      const parsedRes = typeof resultStr === "string" ? JSON.parse(resultStr) : resultStr;
+      
+      const sceneNum = i + 1;
+      const s3key = parsedRes.s3key;
+      if (!s3key) throw new Error(`Missing S3 key for scene ${sceneNum}`);
+
+      // Resolve signed URL
+      const key = extractS3Key(s3key);
+      const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
+      const signedUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 86400 * 7 });
+      
+      videoScenes.push({
+        scene_id: parsedRes.id || sceneNum,
+        s3_key: s3key,
+        url: signedUrl,
+        isFinish: true
+      });
+
+      const localPath = path.join(tmpDir, `scene_${sceneNum}.mp4`);
+      console.log(`[SFN Orchestrator Merge] Downloading scene ${sceneNum} from ${signedUrl}`);
+      const resp = await fetch(signedUrl);
+      if (!resp.ok) throw new Error(`Failed to download scene ${sceneNum}: ${resp.status}`);
+      fs.writeFileSync(localPath, Buffer.from(await resp.arrayBuffer()));
+      
+      // Sanitize scene audio so that it has stereo AAC 44100Hz track (adding silence if none exists)
+      // to avoid FFmpeg concat demuxer audio shifting/muting bugs.
+      await sanitizeAndStandardizeAudio(localPath, ffmpegCmd);
+      
+      inputPaths.push(localPath);
+    }
+
+    const listPath = path.join(tmpDir, `concat_list_${jobId}.txt`);
+    const listContent = inputPaths.map(p => `file '${path.basename(p)}'`).join("\n");
+    fs.writeFileSync(listPath, listContent);
+
+    // Audio overlay path
+    let localAudioPath = null;
+    let finalAudioS3Key = null;
+
+    const requestType = request_type || "";
+    const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || requestType === "TESTIMONY_TULUS" || requestType === "ANIMASI_1";
+
+    if (!isUgcMode && llm_response) {
+      const ttsScript = llm_response.voiceover_script?.script || llm_response.tts_script;
+      if (ttsScript) {
+        try {
+          const { generateTTS } = require("./tts");
+          const { buildTtsGlobalConfig } = require("../lib/resolve-voice");
+          const ttsGlobalConfig = llm_response.tts_global_config || buildTtsGlobalConfig(llm_response, {});
+          const ttsResult = await generateTTS({
+            jobId,
+            userEmail,
+            userId,
+            llmResponse: {
+              ...llm_response,
+              tts_script: ttsScript,
+              tts_global_config: ttsGlobalConfig
+            },
+            S3_RESOURCE_BUCKET,
+            dynamo,
+            USER_REQUEST_TABLE,
+            callGeminiAudio: require("../services").callGeminiAudio,
+            uploadToS3: require("../services").uploadToS3
+          });
+          if (ttsResult && ttsResult.audioS3Key) {
+            finalAudioS3Key = ttsResult.audioS3Key;
+          }
+        } catch (ttsErr) {
+          console.error(`[SFN Orchestrator Merge] TTS generation failed, continuing merge without TTS:`, ttsErr.message);
+        }
+      }
+    }
+
+    // Audio download if present
+    if (finalAudioS3Key) {
+      try {
+        const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: finalAudioS3Key });
+        const signedAudio = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+        localAudioPath = path.join(tmpDir, `audio_${jobId}.wav`);
+        const audioResp = await fetch(signedAudio);
+        if (audioResp.ok) {
+          fs.writeFileSync(localAudioPath, Buffer.from(await audioResp.arrayBuffer()));
+        } else {
+          localAudioPath = null;
+        }
+      } catch (audioDlErr) {
+        console.error(`[SFN Orchestrator Merge] Error downloading TTS audio:`, audioDlErr.message);
+        localAudioPath = null;
+      }
+    }
+
+    const outputPath = path.join(tmpDir, `output_${jobId}.mp4`);
+
+    let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
+    if (localAudioPath) {
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest ${outputPath}`;
+    }
+
+    console.log(`[SFN Orchestrator Merge] Running FFmpeg: ${cmd}`);
+    await new Promise((resolve, reject) => {
+      exec(cmd, (err, stdout, stderr) => {
+        if (err) reject(new Error(`FFmpeg merge failed: ${err.message}`));
+        else resolve();
+      });
+    });
+
+    if (localAudioPath) {
+      try { fs.unlinkSync(localAudioPath); } catch { }
+    }
+
+    const s3Key = `generated_videos/${userId || "anonymous"}/${jobId}.mp4`;
+    console.log(`[SFN Orchestrator Merge] Uploading to S3: ${s3Key}`);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: S3_RESOURCE_BUCKET,
+      Key: s3Key,
+      Body: fs.readFileSync(outputPath),
+      ContentType: "video/mp4"
+    }));
+
+    const videoGenStart = job.video_gen_start_at || job.created_at;
+    let videoGenerationDuration = null;
+    if (videoGenStart) {
+      videoGenerationDuration = Math.round((Date.now() - Date.parse(videoGenStart)) / 1000);
+    }
+
+    // Clean up local files
+    inputPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
+    try { fs.unlinkSync(listPath); } catch { }
+    try { fs.unlinkSync(outputPath); } catch { }
+
+    // Update DynamoDB to include the scenes metadata
+    await dynamo.send(new UpdateCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      UpdateExpression: "SET video_scenes = :vs, video_scene = :vs, updated_at = :now",
+      ExpressionAttributeValues: {
+        ":vs": videoScenes,
+        ":now": getJakartaISOString()
+      }
+    }));
+
+    return {
+      result_url: s3Key,
+      completedAt: getJakartaISOString(),
+      videoGenerationDuration
+    };
+
+  } catch (err) {
+    console.error(`[SFN Orchestrator Merge] Error merging scenes:`, err);
+    throw err;
+  }
+}
+
+module.exports = {
+  triggerStateMachine,
+  triggerManualRedrive,
+  prepareJobData,
+  submitLockImage,
+  submitSceneImage,
+  submitSceneVideo,
+  mergeVideoScenes
+};

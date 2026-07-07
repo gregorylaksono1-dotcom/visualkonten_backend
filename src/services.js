@@ -18,8 +18,9 @@ const {
   TransactWriteCommand,
   BatchGetCommand,
 } = require("@aws-sdk/lib-dynamodb");
-const { Redis } = require("@upstash/redis");
-const { parseCreditsFromPricingItem, buildCreditStatusFilterParts, response } = require("./utils");
+const parseCreditsFromPricingItem = require("./utils").parseCreditsFromPricingItem;
+const buildCreditStatusFilterParts = require("./utils").buildCreditStatusFilterParts;
+const response = require("./utils").response;
 
 const region = process.env.AWS_REGION || "ap-southeast-1";
 const client = new DynamoDBClient({ region });
@@ -32,22 +33,27 @@ const s3Client = new S3Client({ region: s3Region });
 const lambdaClient = new LambdaClient({ region });
 const { getSecrets } = require("./lib/config");
 
+const { Redis } = require("@upstash/redis");
+
 const PRICING_TABLE_NAME = process.env.PRICING_TABLE_NAME;
 const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
 const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
 const COMFYUI_FUNCTION_NAME = process.env.COMFYUI_FUNCTION_NAME;
 const FREE_TRIAL_FUNCTION_NAME = process.env.FREE_TRIAL_FUNCTION_NAME;
-const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
-const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const MIDTRANS_API_URL = process.env.MIDTRANS_API_URL;
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const S3_RESOURCE_BUCKET = bucketName;
+const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
 // Redis Singleton
 let _redis;
 const getRedis = () => {
   if (!_redis) {
-    if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) return null;
+    if (!UPSTASH_REDIS_REST_URL || !UPSTASH_REDIS_REST_TOKEN) {
+      console.warn("[Redis] UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN environment variables missing.");
+      return null;
+    }
     _redis = new Redis({ url: UPSTASH_REDIS_REST_URL, token: UPSTASH_REDIS_REST_TOKEN });
   }
   return _redis;
@@ -302,9 +308,9 @@ const getGoogleClientSecret = async () => {
   return secrets.google_client_secret || null;
 };
 
-const getComfyApiKeys = async () => {
+const getKieAiKey = async () => {
   const secrets = await getSecrets();
-  return secrets.comfy_api_key || null;
+  return secrets.kie_ai || null;
 };
 
 const getFalAiKey = async () => {
@@ -312,12 +318,24 @@ const getFalAiKey = async () => {
   return secrets.fal_ai || null;
 };
 
-const callOpenAILLM = async (systemPrompt, userPrompt) => {
+const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = []) => {
   console.log("Starting OpenAI gpt-5-mini call...");
   const apiKey = await getOpenAiKey();
   if (!apiKey) {
     console.error("OpenAI API Key not found in SSM Parameter Store.");
     throw new Error("OpenAI API Key not found.");
+  }
+
+  let userContent = userPrompt;
+  if (Array.isArray(imageUrls) && imageUrls.length > 0) {
+    console.log(`[services] callOpenAILLM: Including ${imageUrls.length} image(s) in vision LLM payload`);
+    userContent = [
+      { type: "text", text: userPrompt },
+      ...imageUrls.map(url => ({
+        type: "image_url",
+        image_url: { url }
+      }))
+    ];
   }
 
   try {
@@ -331,7 +349,7 @@ const callOpenAILLM = async (systemPrompt, userPrompt) => {
         model: "gpt-5-mini",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
+          { role: "user", content: userContent }
         ],
         temperature: 1
       })
@@ -430,161 +448,7 @@ const callGeminiAudio = async (text, config) => {
   }
 };
 
-/**
- * Pick an available ComfyUI API Key from the provided list based on Redis job counts.
- * Maximum concurrent jobs per key is 1.
- */
-const pickComfyApiKey = async (apiKeysString, redis) => {
-  if (!apiKeysString || !redis) return null;
-  const keys = apiKeysString.split(",").map(k => k.trim()).filter(k => k);
-  if (keys.length === 0) return null;
-  console.log(`[Worker] Keys: ${keys}`);
-  for (const key of keys) {
-    const redisKey = `comfyui_job_${key}`;
-    const count = await redis.get(redisKey);
-    console.log(`[Worker] Count: ${count} for key ${key}`);
-    const currentCount = parseInt(count || "0");
-    const maxJobs = parseInt(process.env.COMFY_MAX_CONCURRENT_JOBS || "1");
-    if (currentCount < maxJobs) {
-      console.log(`Picking key ${key}`)
-      // Pick this key and increment
-      await redis.incr(redisKey);
-      await redis.expire(redisKey, 600); // Auto-release after 10 mins if something goes wrong
-      console.log(`[Redis] Picked API Key and incremented ${redisKey} (TTL: 10m)`);
-      return key;
-    }
-  }
-  return null;
-};
-
-const COMFY_BASE_URL = "https://cloud.comfy.org";
-// const COMFY_BASE_URL = "http://35.194.132.28:8188";
-
-const uploadInputImage = async (imageUrl, filename = "input_image.png", apiKey) => {
-  if (!apiKey) throw new Error("API Key is required for uploadInputImage");
-  console.log(`[services:uploadInputImage] Downloading image from: ${imageUrl.slice(0, 120)}${imageUrl.length > 120 ? '...' : ''}`);
-  const imageRes = await fetch(imageUrl);
-  if (!imageRes.ok) throw new Error(`Gagal download input image: ${imageRes.status}`);
-  const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
-  console.log(`[services:uploadInputImage] Downloaded image, size: ${imageBuffer.length} bytes. Uploading to comfy.org as "${filename}"...`);
-
-  const formData = new FormData();
-  formData.append("image", new Blob([imageBuffer], { type: "image/png" }), filename);
-  formData.append("overwrite", "true");
-
-  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
-    method: "POST",
-    headers: { "X-API-Key": apiKey },
-    body: formData,
-  });
-
-  console.log(`[services:uploadInputImage] Upload response status: ${uploadRes.status}`);
-
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text();
-    console.error(`[services:uploadInputImage] Upload failed: ${text}`);
-    throw new Error(`ComfyUI image upload failed: ${text}`);
-  }
-  const data = await uploadRes.json();
-  console.log(`[services:uploadInputImage] Upload success. Response:`, JSON.stringify(data));
-  return data.name;
-};
-
-const uploadInputAudio = async (audioUrl, filename = "input_audio.wav", apiKey) => {
-  if (!apiKey) throw new Error("API Key is required for uploadInputAudio");
-  console.log(`[services:uploadInputAudio] Downloading audio from: ${audioUrl.slice(0, 120)}${audioUrl.length > 120 ? '...' : ''}`);
-  const audioRes = await fetch(audioUrl);
-  if (!audioRes.ok) throw new Error(`Gagal download input audio: ${audioRes.status}`);
-  const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-  console.log(`[services:uploadInputAudio] Downloaded audio, size: ${audioBuffer.length} bytes. Uploading to comfy.org as "${filename}"...`);
-
-  const formData = new FormData();
-  // ComfyUI Cloud uses the same endpoint and "image" field for all input files
-  formData.append("image", new Blob([audioBuffer], { type: "audio/wav" }), filename);
-  formData.append("overwrite", "true");
-
-  const uploadRes = await fetch(`${COMFY_BASE_URL}/api/upload/image`, {
-    method: "POST",
-    headers: { "X-API-Key": apiKey },
-    body: formData,
-  });
-
-  console.log(`[services:uploadInputAudio] Upload response status: ${uploadRes.status}`);
-
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text();
-    console.error(`[services:uploadInputAudio] Upload failed: ${text}`);
-    throw new Error(`ComfyUI audio upload failed: ${text}`);
-  }
-  const data = await uploadRes.json();
-  console.log(`[services:uploadInputAudio] Upload success. Response:`, JSON.stringify(data));
-  return data.name;
-};
-
-const submitWorkflow = async (workflow, apiKey) => {
-  if (!apiKey) throw new Error("API Key is required for submitWorkflow");
-
-  // --- MOCK HTTP 420 SIMULATION FOR TESTING ---
-  // Uncomment the lines below to simulate comfy.org returning HTTP 420 concurrency limit:
-  /*
-  const err = new Error("ComfyUI submit failed: concurrency limit exceeded (Simulated 420)");
-  err.statusCode = 420;
-  err.workflow = workflow;
-  throw err;
-  */
-  // --------------------------------------------
-
-  const res = await fetch(`${COMFY_BASE_URL}/api/prompt`, {
-    method: "POST",
-    headers: {
-      "X-API-Key": apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ prompt: workflow }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    const err = new Error(`ComfyUI submit failed: ${text}`);
-    err.statusCode = res.status;
-    err.workflow = workflow;
-    throw err;
-  }
-  const data = await res.json();
-  return data.prompt_id;
-};
-
-const resolveSignedUrl = async (fileInfo, apiKey) => {
-  if (!fileInfo?.filename || !apiKey) return null;
-  const params = new URLSearchParams({
-    filename: fileInfo.filename,
-    subfolder: fileInfo.subfolder || "",
-    type: fileInfo.type || "output"
-  });
-  const res = await fetch(`${COMFY_BASE_URL}/api/view?${params}`, {
-    headers: { "X-API-Key": apiKey },
-    redirect: "manual"
-  });
-  return res.headers.get("location");
-};
-
-const getOutputUrl = async (promptId, apiKey) => {
-  const res = await fetch(`${COMFY_BASE_URL}/api/jobs/${promptId}`, {
-    headers: { "X-API-Key": apiKey },
-  });
-  if (!res.ok) return null;
-
-  const job = await res.json();
-  const outputs = job.outputs || {};
-  for (const nodeOutputs of Object.values(outputs)) {
-    const files = [...(nodeOutputs.gifs || []), ...(nodeOutputs.videos || []), ...(nodeOutputs.images || [])];
-    for (const file of files) {
-      const url = await resolveSignedUrl(file, apiKey);
-      if (url) return url;
-    }
-  }
-  return null;
-};
+// ComfyUI helper functions removed during Kie.ai migration.
 
 const getCustomerProfile = async (userId) => {
   const getRes = await docClient.send(new GetCommand({
@@ -828,13 +692,7 @@ module.exports = {
   getFalAiKey,
   callGeminiAudio,
   getRedis,
-  pickComfyApiKey,
-  getComfyApiKeys,
-  uploadInputImage,
-  uploadInputAudio,
-  submitWorkflow,
-  getOutputUrl,
-  resolveSignedUrl,
+  getKieAiKey,
   getCustomerProfile,
   getUserProfile,
   queryTopupCreditHistory,

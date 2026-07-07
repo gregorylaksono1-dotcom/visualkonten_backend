@@ -1,50 +1,35 @@
-const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
-const { GetObjectCommand } = require("@aws-sdk/client-s3");
-const { getJakartaISOString } = require("../utils");
-const { getSignedUrl, uploadInputImage, uploadInputAudio, submitWorkflow } = require("../services");
+"use strict";
 
+const { GetObjectCommand } = require("@aws-sdk/client-s3");
+const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { getJakartaISOString } = require("../utils");
+const { getSignedUrl } = require("../services");
+const { generateComfyUIVideo } = require("./videoGeneration");
 
 /**
- * Executes dynamic multi-scene video generation pipeline for UGC-P requests.
+ * Executes multi-scene video generation pipeline for UGC requests.
+ * Triggers video generation tasks for ALL scenes in parallel using Kie.ai.
  */
 async function generateMultiScenePipeline(params) {
   const {
-    jobId, userEmail, userId, currentS3ImageUrls, llmResponse, finalJobPrompt, videoQuality, aspectRatio,
+    jobId, userEmail, userId, llmResponse, finalJobPrompt, videoQuality, aspectRatio,
     S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, audio, audioDuration, requestType,
     existingJob
   } = params;
 
-  console.log(`[MultiSceneGen] Starting dynamic multi-scene pipeline for job ${jobId}`);
-
-  let comfyApiKey = params.comfyApiKey;
-  let redis = null;
+  console.log(`[MultiSceneGen] Starting UGC multi-scene pipeline for job ${jobId}`);
 
   try {
-    let scenes = llmResponse.scenes || [];
+    let scenes = llmResponse.scenes || llmResponse.scene || [];
     if (!Array.isArray(scenes) || scenes.length === 0) {
-      throw new Error("No scenes found in LLM response for UGC-P multi-scene generation.");
+      throw new Error("No scenes found in LLM response for multi-scene generation.");
     }
     if (requestType === "FREE-TRIAL") {
       scenes = scenes.slice(0, 2);
     }
 
-    // 1. Load existing talent image - Skip for FREE-TRIAL
-    let generatedTalentImageUrl = null;
-    let talentS3Key = null;
-
-    if (requestType !== "FREE-TRIAL") {
-      if (existingJob && existingJob.generated_image_talent) {
-        talentS3Key = existingJob.generated_image_talent;
-        const talentImgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: talentS3Key });
-        generatedTalentImageUrl = await getSignedUrl(s3, talentImgCmd, { expiresIn: 3600 });
-        console.log(`[MultiSceneGen] Reusing existing talent image: ${talentS3Key}`);
-      } else {
-        throw new Error("Missing generated talent image from preview stage.");
-      }
-    }
-
-    // 2. Load existing scene images
-    const generatedScenes = [];
+    // 1. Resolve keyframe image URLs for each scene from preview stage
+    const sceneInputs = [];
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
       const sceneId = scene.scene_id || (i + 1);
@@ -67,110 +52,72 @@ async function generateMultiScenePipeline(params) {
         }
       }
 
-      generatedScenes.push({
-        scene_id: sceneId,
-        s3_key: existingScene.s3_key,
-        url: sceneUrl
+      // talkvid is true unless explicitly set to false
+      const talkvid = scene.talkvid !== false;
+
+      sceneInputs.push({
+        sceneId,
+        url: sceneUrl,
+        prompt: scene.ltx_prompt || scene.prompt || finalJobPrompt,
+        talkvid
       });
     }
 
-    // 4. Pick ComfyUI API Key right before uploading/submitting
-    if (!comfyApiKey) {
-      const { pickComfyApiKey, getComfyApiKeys, getRedis } = require("../services");
-      const apiKeysString = await getComfyApiKeys();
-      redis = getRedis();
-      comfyApiKey = await pickComfyApiKey(apiKeysString, redis);
-    }
-
-    if (!comfyApiKey) {
-      console.log(`[MultiSceneGen] All ComfyUI API keys are busy. Concurrency limit reached.`);
-      const err = new Error("All ComfyUI API keys are busy (Concurrency Limit)");
-      err.statusCode = 420;
-      throw err;
-    }
-
-    // 5. Upload keyframe images for each scene and construct workflow scenes array
-    const sceneImageFilenames = generatedScenes.map(gs => `${jobId}_scene_${gs.scene_id}.png`);
-    const workflowScenes = [];
-    for (let i = 0; i < scenes.length; i++) {
-      const scene = scenes[i];
-      const gs = generatedScenes[i];
-      const comfyImageName = sceneImageFilenames[i];
-      console.log(`[MultiSceneGen] Uploading Scene ${gs.scene_id} image to ComfyUI Cloud...`);
-      const returnedName = await uploadInputImage(gs.url, comfyImageName, comfyApiKey);
-
-      workflowScenes.push({
-        image: returnedName,
-        prompt: scene.ltx_prompt || scene.prompt || "",
-        duration: Number(scene.duration_seconds || 4),
-        talkvid: scene.talkvid ?? false
+    // 2. Submit all video tasks to Kie.ai in parallel
+    console.log(`[MultiSceneGen] Submitting ${sceneInputs.length} scenes to Kie.ai in parallel...`);
+    const submissionPromises = sceneInputs.map(sceneInput => {
+      return generateComfyUIVideo({
+        uuid: jobId,
+        user_email: userEmail,
+        user_id: userId,
+        request_type: requestType,
+        llm_response: llmResponse,
+        audio,
+        audio_duration: audioDuration,
+        video_quality: videoQuality,
+        aspect_ratio: aspectRatio,
+        imageResultUrl: sceneInput.url,
+        dynamo,
+        s3,
+        USER_REQUEST_TABLE,
+        S3_RESOURCE_BUCKET,
+        prompt: sceneInput.prompt,
+        sceneId: sceneInput.sceneId,
+        talkvid: sceneInput.talkvid
       });
-    }
-
-    // 5.5. Upload TTS Audio if provided
-    let comfyAudioName = null;
-    if (audio) {
-      comfyAudioName = `${jobId}_tts.wav`;
-      console.log(`[MultiSceneGen] Uploading TTS Audio to ComfyUI Cloud...`);
-      const audioCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: audio });
-      const audioSignedUrl = await getSignedUrl(s3, audioCmd, { expiresIn: 3600 });
-      await uploadInputAudio(audioSignedUrl, comfyAudioName, comfyApiKey);
-    }
-
-    // 6. Generate dynamic Seedance workflow
-    const { buildSeedanceWorkflow } = require("../lib/generate-seedance-workflow");
-    const workflow = buildSeedanceWorkflow(workflowScenes, {
-      resolution: "720p", // default to 720p
-      aspectRatio: aspectRatio || "9:16", // default to 9:16
-      audioFile: comfyAudioName
     });
 
-    // 7. Convert to API Prompt and Submit Video Job to ComfyUI Cloud
-    const { graphToApiPrompt } = require("../lib/comfy-graph-to-api-prompt");
+    const taskIds = await Promise.all(submissionPromises);
+    console.log(`[MultiSceneGen] Successfully submitted all scenes. Task IDs: ${taskIds.join(", ")}`);
 
-    console.log("=========================================");
-    console.log("[MultiSceneGen] ORIGINAL DYNAMIC WORKFLOW GRAPH:");
-    console.log(JSON.stringify(workflow, null, 2));
-    console.log("=========================================");
+    // 3. Build video_scenes array
+    const videoScenes = taskIds.map((taskId, i) => {
+      const sceneKey = `scene_${sceneInputs[i].sceneId}`;
+      return {
+        [sceneKey]: taskId,
+        isFinish: false
+      };
+    });
 
-    const apiPrompt = graphToApiPrompt(workflow);
-
-    console.log("=========================================");
-    console.log("[MultiSceneGen] CONVERTED API PROMPT SENT TO COMFYUI:");
-    console.log(JSON.stringify(apiPrompt, null, 2));
-    console.log("=========================================");
-
-    console.log(`[MultiSceneGen] Submitting multi-scene workflow to ComfyUI Cloud...`);
-    const videoPromptId = await submitWorkflow(apiPrompt, comfyApiKey);
-    console.log(`[MultiSceneGen] Submitted successfully. Prompt ID: ${videoPromptId}`);
-
-    // 8. Update status to PROCESSING and set comfy_prompt_id / used_api_key
+    // 4. Update DynamoDB status to PROCESSING and save video_scenes (both video_scenes and video_scene)
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET comfy_prompt_id = :vp, #s = :status, used_api_key = :uak, updated_at = :now",
+      UpdateExpression: "SET video_scenes = :vs, video_scene = :vs, comfy_prompt_id = :cp, #s = :status, updated_at = :now, video_gen_start_at = :now",
       ExpressionAttributeNames: { "#s": "status" },
       ExpressionAttributeValues: {
-        ":vp": videoPromptId,
+        ":vs": videoScenes,
+        ":cp": taskIds[0], // Store first taskId in comfy_prompt_id for backward compatibility
         ":status": "PROCESSING",
-        ":uak": comfyApiKey || null,
         ":now": getJakartaISOString()
       }
     }));
 
-    return videoPromptId;
+    console.log(`[MultiSceneGen] Successfully updated DynamoDB for job ${jobId}`);
+    return taskIds[0];
 
   } catch (err) {
-    console.error(`[MultiSceneGen] Error in multi-scene generation pipeline:`, err);
-    if (comfyApiKey && redis) {
-      try {
-        const redisKey = `comfyui_job_${comfyApiKey}`;
-        await redis.decr(redisKey);
-        console.log(`[MultiSceneGen] [Redis] Decremented ${redisKey} due to pipeline failure`);
-      } catch (rErr) {
-        console.error("[MultiSceneGen] [Redis] Error decrementing:", rErr.message);
-      }
-    }
+    console.error(`[MultiSceneGen] Error in multi-scene pipeline:`, err);
     throw err;
   }
 }

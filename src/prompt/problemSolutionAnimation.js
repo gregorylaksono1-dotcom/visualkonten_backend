@@ -4,7 +4,6 @@ const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getJakartaISOString } = require("../utils");
 const { getFalAiKey, getSignedUrl, resolvePricingRow, callOpenAILLM, findPricingItem, s3Client } = require("../services");
-const { callOpenAIImageEdit } = require("../core/imageGenerationOpenAI");
 const { parseStandardLlmResponse } = require("../core/llmParser");
 
 /**
@@ -27,7 +26,7 @@ async function updateJobStatus(dynamo, tableName, jobId, userEmail, status, erro
       ExpressionAttributeValues: values,
     }));
   } catch (err) {
-    console.error("[testimonyPresenter] Dynamo status update error:", err.message);
+    console.error("[problemSolutionAnimation] Dynamo status update error:", err.message);
   }
 }
 
@@ -60,13 +59,13 @@ async function fetchS3Text(urlStr) {
         bucket = parts[0];
         key = parts.slice(1).join("/");
       } else {
-        console.log(`[testimonyPresenter] Direct fetch for custom URL: ${url}`);
+        console.log(`[problemSolutionAnimation] Direct fetch for custom URL: ${url}`);
         const resp = await fetch(url);
         if (resp.ok) return await resp.text();
         throw new Error(`Direct fetch failed with status ${resp.status}`);
       }
     } catch (e) {
-      console.warn(`[testimonyPresenter] Error parsing HTTP S3 URL: ${e.message}, falling back to direct fetch`);
+      console.warn(`[problemSolutionAnimation] Error parsing HTTP S3 URL: ${e.message}, falling back to direct fetch`);
       const resp = await fetch(url);
       if (resp.ok) return await resp.text();
       throw e;
@@ -79,7 +78,7 @@ async function fetchS3Text(urlStr) {
     const appBucket = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
     if (bucket.toLowerCase() === appBucket.toLowerCase()) {
       const { GetObjectCommand } = require("@aws-sdk/client-s3");
-      console.log(`[testimonyPresenter] Generating signed URL for our own bucket: ${bucket}, key: ${key}`);
+      console.log(`[problemSolutionAnimation] Generating signed URL for our own bucket: ${bucket}, key: ${key}`);
       const cmd = new GetObjectCommand({ Bucket: bucket, Key: decodeURIComponent(key) });
       const signed = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
       const resp = await fetch(signed);
@@ -91,11 +90,11 @@ async function fetchS3Text(urlStr) {
       const publicUrl = url.startsWith("s3://")
         ? `https://${bucket}.s3.amazonaws.com/${key}`
         : url;
-      console.log(`[testimonyPresenter] Bucket ${bucket} is not our app bucket (${appBucket}). Fetching public S3 URL: ${publicUrl}`);
+      console.log(`[problemSolutionAnimation] Bucket ${bucket} is not our app bucket (${appBucket}). Fetching public S3 URL: ${publicUrl}`);
       let resp = await fetch(publicUrl);
       if (!resp.ok) {
         const regionalUrl = `https://${bucket}.s3.ap-southeast-1.amazonaws.com/${key}`;
-        console.log(`[testimonyPresenter] Global S3 URL failed with status ${resp.status}. Retrying with regional S3 URL: ${regionalUrl}`);
+        console.log(`[problemSolutionAnimation] Global S3 URL failed with status ${resp.status}. Retrying with regional S3 URL: ${regionalUrl}`);
         resp = await fetch(regionalUrl);
       }
       if (resp.ok) {
@@ -116,15 +115,15 @@ async function loadPromptBuilder(requestType) {
   try {
     const resolved = await resolvePricingRow(requestType);
     if (resolved && resolved.item && resolved.item.prompt) {
-      console.log("dapet nih:", resolved);
+      console.log("[problemSolutionAnimation] resolvePricingRow matched:", resolved);
       const url = String(resolved.item.prompt).trim();
       if (url.startsWith("http") || url.startsWith("s3://")) {
         try {
           const content = await fetchS3Text(url);
-          console.log(`[testimonyPresenter] Successfully loaded prompt builder template content (${content.length} chars) from S3 URL: ${url}`);
+          console.log(`[problemSolutionAnimation] Successfully loaded prompt builder template content (${content.length} chars) from S3 URL: ${url}`);
           return content;
         } catch (e) {
-          console.error(`[testimonyPresenter] Failed to fetch prompt builder:`, e.message);
+          console.error(`[problemSolutionAnimation] Failed to fetch prompt builder:`, e.message);
           return "# Prompt content unavailable (S3 fetch failed)";
         }
       }
@@ -132,7 +131,7 @@ async function loadPromptBuilder(requestType) {
     }
     // Fallback: try findPricingItem ignoring charge
     const rawItem = await findPricingItem(requestType);
-    console.log("Apakah ketemu raw item:", rawItem);
+    console.log("[problemSolutionAnimation] Fallback raw pricing item:", rawItem);
     if (rawItem && (rawItem.prompt || rawItem.prompt?.S)) {
       const promptVal = rawItem.prompt?.S || rawItem.prompt;
       const url2 = String(promptVal).trim();
@@ -140,7 +139,7 @@ async function loadPromptBuilder(requestType) {
         try {
           return await fetchS3Text(url2);
         } catch (e) {
-          console.error(`[testimonyPresenter] Failed to fetch secondary prompt builder:`, e.message);
+          console.error(`[problemSolutionAnimation] Failed to fetch secondary prompt builder:`, e.message);
           return "# Prompt content unavailable (secondary fetch failed)";
         }
       }
@@ -148,43 +147,42 @@ async function loadPromptBuilder(requestType) {
     }
 
   } catch (err) {
-    console.error(`[testimonyPresenter] Error fetching prompt builder for ${requestType}:`, err.message);
+    console.error(`[problemSolutionAnimation] Error fetching prompt builder for ${requestType}:`, err.message);
   }
   return null;
 }
 
 /**
- * Main testimony handler.
+ * Main ANIMASI_1 handler.
  */
-async function handleTestimonyTulus(params) {
+async function handleAnimasi1(params) {
   const {
     jobId, userEmail, userId, currentS3ImageUrls, prompt, videoQuality, aspectRatio,
     S3_RESOURCE_BUCKET, dynamo, s3, USER_REQUEST_TABLE, preview, existingJob
   } = params;
 
-  const requestType = "TESTIMONY_TULUS";
-  console.log(`[testimonyPresenter] Running Testimony Presenter Pipeline in a single pass for job ${jobId}`);
-  const startTime = Date.now();
+  const requestType = "ANIMASI_1";
+  console.log(`[problemSolutionAnimation] Running Animasi 1 Handler Pipeline in a single pass for job ${jobId}`);
 
   try {
     // A. Load Prompt Builder template
     let template = await loadPromptBuilder(requestType);
     // Fallback: try lowercase key if not found
     if (!template) {
-      console.warn(`[testimonyPresenter] Prompt not found for ${requestType}, trying lowercase fallback.`);
+      console.warn(`[problemSolutionAnimation] Prompt not found for ${requestType}, trying lowercase fallback.`);
       template = await loadPromptBuilder(requestType.toLowerCase());
     }
     // Additional fallback: replace underscores with hyphens
     if (!template) {
       const hyphenKey = requestType.replace(/_/g, "-");
-      console.warn(`[testimonyPresenter] Prompt still not found, trying hyphenated key ${hyphenKey}.`);
+      console.warn(`[problemSolutionAnimation] Prompt still not found, trying hyphenated key ${hyphenKey}.`);
       template = await loadPromptBuilder(hyphenKey);
     }
     if (!template) {
       throw new Error(`Prompt builder template not found in pricing table for ${requestType}`);
     }
 
-    // B. Build user prompt and call OpenAI/LLM
+    // B. Build system and user prompt with wrapper.txt + rule_master.md
     const { getRuleMaster, getSystemPromptWrapper } = require("../core/ugcLlm");
     
     const ruleMaster = await getRuleMaster();
@@ -195,14 +193,14 @@ async function handleTestimonyTulus(params) {
     const userPrompt = `## BUILDER FORMAT PROTOCOL\n${template}\n\n## PRODUCT BRIEF\n${briefPrompt}`;
 
     console.log(`[PIPELINE_LOG] [LLM] Calling LLM API for request type: ${requestType}`);
-    console.log(`[testimonyPresenter] Calling LLM with wrapped prompts`);
+    console.log(`[problemSolutionAnimation] Calling LLM with wrapped prompts`);
     const aiResponse = await callOpenAILLM(systemPrompt, userPrompt);
 
     // C. Parse JSON response
     const llmResponse = parseStandardLlmResponse(aiResponse);
-    console.log(`[testimonyPresenter] Successfully parsed standard LLM JSON structure.`);
+    console.log(`[problemSolutionAnimation] Successfully parsed standard LLM JSON structure.`);
 
-    // Map custom testimony scenes layout to standard UGC-P scenes layout for ComfyUI compatibility
+    // Map custom scenes layout to standard UGC-P scenes layout for ComfyUI compatibility
     if (llmResponse.scenes && Array.isArray(llmResponse.scenes)) {
       llmResponse.scenes = llmResponse.scenes.map(s => ({
         ...s,
@@ -223,12 +221,12 @@ async function handleTestimonyTulus(params) {
 
     return llmResponse;
   } catch (err) {
-    console.error(`[testimonyPresenter] Pipeline execution failed for job ${jobId}:`, err);
+    console.error(`[problemSolutionAnimation] Pipeline execution failed for job ${jobId}:`, err);
     throw err;
   }
 }
 
 module.exports = {
-  handleTestimonyTulus,
+  handleAnimasi1,
   loadPromptBuilder
 };

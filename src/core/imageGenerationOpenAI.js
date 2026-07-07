@@ -1,7 +1,8 @@
 const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getJakartaISOString } = require("../utils");
-const { getFalAiKey, getSignedUrl } = require("../services");
+const { getKieAiKey, getSignedUrl } = require("../services");
+const { uploadToKie, createKieTask, findMediaUrlInKieData } = require("../lib/kie-ai");
 const { generateComfyUIVideo } = require("./videoGeneration");
 
 function resolveImagePrompts(llmResponse, finalJobPrompt) {
@@ -34,119 +35,80 @@ function resolveImagePrompts(llmResponse, finalJobPrompt) {
   return [{ key: "prompt", prompt: legacy, suffix: "main" }];
 }
 
-function normalizeFalApiKey(apiKey) {
-  let key = String(apiKey || "").trim();
-  if (
-    (key.startsWith('"') && key.endsWith('"')) ||
-    (key.startsWith("'") && key.endsWith("'"))
-  ) {
-    key = key.slice(1, -1).trim();
+async function waitForKieTask(taskId, kieApiKey, maxWaitSec = 300) {
+  const { getKieTaskStatus } = require("../lib/kie-ai");
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const start = Date.now();
+  while (Date.now() - start < maxWaitSec * 1000) {
+    const res = await getKieTaskStatus(taskId, kieApiKey);
+    if (res.code === 200 && res.data) {
+      const status = String(res.data.state || res.data.status || "").toLowerCase();
+      if (status === "success" || status === "text_success") {
+        return res.data;
+      } else if (status === "fail" || status === "create_task_failed" || status === "generate_failed") {
+        throw new Error(`Kie.ai task failed: ${res.data.msg || "unknown error"}`);
+      }
+    }
+    await sleep(1500);
   }
-  if (/^key\s+/i.test(key)) {
-    key = key.replace(/^key\s+/i, "").trim();
-  }
-  if (/^bearer\s+/i.test(key)) {
-    key = key.replace(/^bearer\s+/i, "").trim();
-  }
-  return key;
+  throw new Error(`Kie.ai task timed out after ${maxWaitSec} seconds`);
 }
 
-const USE_FLUX_DEV = true; //true
-
 async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
-  const { getFalAiKey } = require("../services");
-  let falApiKey = await getFalAiKey();
-  falApiKey = normalizeFalApiKey(falApiKey);
-  if (!falApiKey) {
-    throw new Error("Fal.ai API Key not found in SSM Parameter Store.");
+  const kieApiKey = await getKieAiKey();
+  if (!kieApiKey) {
+    throw new Error("Kie.ai API Key not found in SSM Parameter Store.");
   }
 
   const hasReference = Array.isArray(referenceUrls) && referenceUrls.length > 0 && referenceUrls[0];
 
-  let modelId;
-  if (USE_FLUX_DEV) {
-    modelId = hasReference ? "fal-ai/flux/dev/image-to-image" : "fal-ai/flux/dev";
-  } else {
-    modelId = hasReference ? "fal-ai/flux-2-pro/edit" : "fal-ai/flux-2-pro";
-  }
-  const endpoint = `https://fal.run/${modelId}`;
-
-  let width = 1024;
-  let height = 1536;
+  let resolvedAspectRatio = "9:16";
   if (size) {
     const parts = size.split("x");
     if (parts.length === 2) {
-      width = parseInt(parts[0], 10);
-      height = parseInt(parts[1], 10);
+      const w = parseInt(parts[0], 10);
+      const h = parseInt(parts[1], 10);
+      if (w === h) resolvedAspectRatio = "1:1";
+      else if (w > h) resolvedAspectRatio = "16:9";
     }
   }
 
-  const payload = {
-    prompt: prompt,
-    image_size: {
-      width: width,
-      height: height
-    }
+  let model;
+  const input = {
+    prompt,
+    aspect_ratio: resolvedAspectRatio,
+    resolution: "1K",
+    nsfw_checker: false
   };
 
-  const guidanceScale = process.env.FAL_GUIDANCE_SCALE ? parseFloat(process.env.FAL_GUIDANCE_SCALE) : null;
-  const numSteps = process.env.FAL_NUM_INFERENCE_STEPS ? parseInt(process.env.FAL_NUM_INFERENCE_STEPS, 10) : null;
-
-  if (guidanceScale !== null && !isNaN(guidanceScale)) {
-    payload.guidance_scale = guidanceScale;
-  }
-  if (numSteps !== null && !isNaN(numSteps)) {
-    payload.num_inference_steps = numSteps;
-  }
-
   if (hasReference) {
-    const urls = referenceUrls.filter(Boolean);
-    payload.image_urls = urls;
-    if (urls.length > 0) {
-      payload.image_url = urls[0];
-    }
+    model = "flux-2/pro-image-to-image";
+    // Upload reference image to Kie.ai first
+    const kieRefUrl = await uploadToKie(referenceUrls[0], kieApiKey);
+    input.input_urls = [kieRefUrl];
+  } else {
+    model = "flux-2/pro-text-to-image";
   }
 
-  console.log(`[Fal.ai ImageGen] Calling endpoint ${endpoint} for prompt: "${prompt.slice(0, 100)}..." and size: ${width}x${height}`);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Authorization": `Key ${falApiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  console.log(`[Kie.ai ImageGen] Creating task for model ${model} with prompt: "${prompt.slice(0, 100)}..."`);
+  const taskId = await createKieTask(model, input, null, kieApiKey);
 
-  if (!response.ok) {
-    const errText = await response.text();
-    if (response.status === 401) {
-      const maskedKey = falApiKey.length > 8
-        ? `${falApiKey.slice(0, 4)}...${falApiKey.slice(-4)}`
-        : "***";
-      throw new Error(
-        `Fal.ai API error (401): ${errText}\n` +
-        `  -> FAL_KEY terdeteksi: "${maskedKey}" (panjang: ${falApiKey.length} karakter).\n` +
-        `  -> Pastikan Key ini valid di SSM Parameter Store / Environment, dan tidak mengandung karakter literal '<' atau '>'.`
-      );
-    }
-    throw new Error(`Fal.ai API error (${response.status}): ${errText}`);
-  }
+  console.log(`[Kie.ai ImageGen] Waiting for task completion: ${taskId}...`);
+  const taskResult = await waitForKieTask(taskId, kieApiKey);
 
-  const resJson = await response.json();
-  const urlData = resJson.images?.[0]?.url;
-
+  const urlData = findMediaUrlInKieData(taskResult);
   if (urlData) {
-    console.log(`[Fal.ai ImageGen] Download generated image from fal.ai: ${urlData}`);
+    console.log(`[Kie.ai ImageGen] Download generated image: ${urlData}`);
     const imgDownloadRes = await fetch(urlData);
     if (!imgDownloadRes.ok) {
-      throw new Error(`Failed to download generated image from fal.ai: ${imgDownloadRes.status}`);
+      throw new Error(`Failed to download generated image from Kie.ai: ${imgDownloadRes.status}`);
     }
     return {
       buffer: Buffer.from(await imgDownloadRes.arrayBuffer()),
       fallbackUrl: urlData
     };
   }
-  throw new Error(`No image data returned from fal.ai API. Response: ${JSON.stringify(resJson)}`);
+  throw new Error(`No image data returned from Kie.ai task result.`);
 }
 
 async function generateImageOpenAI(params) {

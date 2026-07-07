@@ -59,6 +59,39 @@ const loadPromptBuilder = async (requestType) => {
   return null;
 };
 
+let cachedRuleMaster = null;
+
+const getRuleMaster = async () => {
+  if (cachedRuleMaster) return cachedRuleMaster;
+  console.log(`[UGC-LLM] Fetching rule_master.md from S3...`);
+  const response = await fetch("https://gambr-public.s3.ap-southeast-1.amazonaws.com/prompt/rule_master.md");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch rule_master.md: ${response.status}`);
+  }
+  cachedRuleMaster = await response.text();
+  console.log(`[UGC-LLM] Successfully fetched and cached rule_master.md (${cachedRuleMaster.length} characters)`);
+  return cachedRuleMaster;
+};
+
+const getSystemPromptWrapper = () => {
+  const wrapperPath = path.join(__dirname, "../prompt/wrapper.txt");
+  if (!fs.existsSync(wrapperPath)) {
+    console.warn(`[UGC-LLM] wrapper.txt not found at ${wrapperPath}`);
+    return "";
+  }
+  let content = fs.readFileSync(wrapperPath, "utf-8");
+  const notesIndex = content.indexOf("CATATAN PEMAKAIAN");
+  if (notesIndex !== -1) {
+    const lastSeparator = content.lastIndexOf("================================================================================", notesIndex);
+    if (lastSeparator !== -1) {
+      content = content.substring(0, lastSeparator).trim();
+    } else {
+      content = content.substring(0, notesIndex).trim();
+    }
+  }
+  return content;
+};
+
 /**
  * @returns {Promise<object>} Pipeline-compatible llm_response object
  */
@@ -70,6 +103,7 @@ const generateUgcLlmResponse = async ({
   videoDuration = 15,
   lipSync = true,
   callLLM,
+  imageUrls = []
 }) => {
   if (
     requestType !== "UGC-P" &&
@@ -88,45 +122,53 @@ const generateUgcLlmResponse = async ({
 
   console.log(`[PIPELINE_LOG] [LLM] Calling LLM API for request type: ${requestType}`);
 
+  // Resolve template (builder) based on request type if not already retrieved
   if (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") {
     if (!template) {
-      console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading and sending product_ad.md as prompt builder to OpenAI`);
+      console.log(`[UGC-LLM] PRODUCT-CINEMATIC request: Reading product_ad.md as prompt builder`);
       template = fs.readFileSync(path.join(PROMPT_DIR, "product_ad.md"), "utf-8");
     }
-    const userPrompt = `1. {product_description}: ${description}\n2. {video_duration}: ${videoDuration} detik`;
-    const aiResponse = await callLLM(template, userPrompt);
-    return parseJsonFromLlm(aiResponse);
-  }
-
-  if (requestType === "FREE-TRIAL") {
+  } else if (requestType === "FREE-TRIAL") {
     if (!template) {
-      console.log(`[UGC-LLM] FREE-TRIAL request: Reading and sending ugc_free_trial.md as prompt builder to OpenAI`);
+      console.log(`[UGC-LLM] FREE-TRIAL request: Reading ugc_free_trial.md as prompt builder`);
       template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_free_trial.md"), "utf-8");
     }
-    const userPrompt = buildLegacyUserPrompt("UGC-P", description, opts);
-    const aiResponse = await callLLM(template, userPrompt);
-    return parseJsonFromLlm(aiResponse);
-  }
-
-  if (requestType === "UGC-P") {
+  } else if (requestType === "UGC-P") {
     if (!template) {
-      console.log(`[UGC-LLM] UGC-P request: Reading and sending ugc_slim.md as prompt builder to OpenAI`);
+      console.log(`[UGC-LLM] UGC-P request: Reading ugc_slim.md as prompt builder`);
       template = fs.readFileSync(path.join(PROMPT_DIR, "ugc_slim.md"), "utf-8");
     }
-    const userPrompt = buildLegacyUserPrompt(requestType, description, opts);
-    const aiResponse = await callLLM(template, userPrompt);
-    return parseJsonFromLlm(aiResponse);
+  } else {
+    if (!template) {
+      console.log(`[UGC-LLM] legacy monolithic prompt (${requestType})`);
+      template = loadLegacyTemplate(requestType, storeType);
+    }
   }
 
-  if (!template) {
-    console.log(`[UGC-LLM] legacy monolithic prompt (${requestType})`);
-    template = loadLegacyTemplate(requestType, storeType);
+  // Build the Product Brief description
+  let briefPrompt = "";
+  if (requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK") {
+    briefPrompt = `1. {product_description}: ${description}\n2. {video_duration}: ${videoDuration} detik`;
+  } else if (requestType === "FREE-TRIAL") {
+    briefPrompt = buildLegacyUserPrompt("UGC-P", description, opts);
+  } else {
+    briefPrompt = buildLegacyUserPrompt(requestType, description, opts);
   }
-  const userPrompt = buildLegacyUserPrompt(requestType, description, opts);
-  const aiResponse = await callLLM(template, userPrompt);
+
+  // Load Rule Master and construct System Prompt (wrapper + rule master)
+  const ruleMaster = await getRuleMaster();
+  const wrapperContent = getSystemPromptWrapper();
+  const systemPrompt = `${wrapperContent}\n\n${ruleMaster}`;
+
+  // Construct User Prompt (builder template + product brief)
+  const userPrompt = `## BUILDER FORMAT PROTOCOL\n${template}\n\n## PRODUCT BRIEF\n${briefPrompt}`;
+
+  const aiResponse = await callLLM(systemPrompt, userPrompt, imageUrls);
   return parseJsonFromLlm(aiResponse);
 };
 
 module.exports = {
   generateUgcLlmResponse,
+  getRuleMaster,
+  getSystemPromptWrapper
 };

@@ -1,0 +1,21 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend functions for BikinBik",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "sam build",
+    "deploy": "sam deploy --config-env default --no-confirm-changeset --force-upload"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/client-lambda": "^3.600.0",
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "aws-sdk": "^2.1480.0"
+  }
+}

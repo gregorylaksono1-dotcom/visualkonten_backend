@@ -1,0 +1,57 @@
+{
+    "template": "ugc_talking_solo",
+    "render": {
+        "fps": 24
+    },
+    "engine": {
+        "model": "seedance_1.5_pro",
+        "generate_audio": true
+    },
+    "product": {
+        "name": "SKINTIFIC - PDRN Radiance Bright Serum Spray 100ml",
+        "category": "skincare",
+        "image": "P1"
+    },
+    "locks": {
+        "talent": {
+            "type": "generated_reference",
+            "gen_model": "seedream",
+            "image_prompt": "a naturally attractive and photogenic young Indonesian woman in her early 20s, glowing skin with a soft natural finish, pretty but relatable everyday look, smiling friendly appearance, shot on a smartphone front camera, casual handheld selfie, vertical 9:16",
+            "negative_image_prompt": "blemishes, acne, dull tired skin, unattractive, unflattering, plastic skin, airbrushed, overprocessed, heavy retouching, waxy, western features, pale skin"
+        },
+        "product": {
+            "type": "provided_reference",
+            "image": "P1"
+        }
+    },
+    "voiceover_script": {
+        "script": "Serum spray ini praktis banget, langsung bikin muka glowing, segar, dan bebas kusam seharian!",
+        "lang": "id",
+        "word_count": 13
+    },
+    "scenes": [
+        {
+            "scene_id": 1,
+            "scene_name": "talk",
+            "scene_type": "talking_solo",
+            "duration": 8,
+            "dependency": [
+                "talent",
+                "product"
+            ],
+            "gen_mode": "identity_ref",
+            "talkvid": true,
+            "cut_after": false,
+            "image_prompt": "Medium close-up of the same young Indonesian woman from the talent reference, holding the SKINTIFIC serum spray bottle (from the product reference) up beside her chest with the label visible to the camera, looking directly at the camera with a friendly expression, mouth closed ready to speak, soft window daylight, shot on a smartphone front camera, casual handheld selfie, realistic skin texture with pores, candid authentic UGC look, vertical 9:16",
+            "negative_image_prompt": "western features, pale skin, garbled label, warped bottle, extra fingers, deformed hands, overprocessed, airbrushed, plastic skin, studio lighting, wide shot, CGI, on-screen text",
+            "video_prompt": "Realistic handheld selfie footage, soft natural light. The young Indonesian woman looks at the camera and says in Indonesian: \"Serum spray ini praktis banget, langsung bikin muka glowing, segar, dan bebas kusam seharian!\" with natural, clear lip movement fully in sync with her voice, holding the SKINTIFIC serum spray bottle steady beside her chest, a small natural head movement and a bright smile. Audio: her clear cheerful voice speaking Indonesian, faint quiet room ambience, no music.",
+            "negative_video_prompt": "face morphing, changing identity, different person, deformed hands, extra fingers, warped bottle, garbled label, mouth desync, exaggerated movement, fast motion, flickering, jitter, blurry, low quality, watermark, on-screen text, subtitles",
+            "camera_movement": "locked medium close-up, very slight handheld sway"
+        }
+    ],
+    "produce_as": "SINGLE scene Seedance 1.5 Pro, generate_audio. ~8s. Dialog quoted di video_prompt, no music. 1 pass, no stitching.",
+    "post": {
+        "captions": "opsional burn-in subtitle CapCut",
+        "grade": "warm authentic"
+    }
+}

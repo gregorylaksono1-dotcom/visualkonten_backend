@@ -31,9 +31,27 @@ exports.handler = async (event) => {
         return { statusCode: 400, body: JSON.stringify({ message: "Invalid JSON body" }) };
     }
 
+    const path = event.path || "";
+    const queryParams = event.queryStringParameters || {};
+    const isImage = path.endsWith("/images") || path.includes("/images");
+    
+    let jobId = queryParams['request-id'] || queryParams.jobId;
+    if (!jobId) {
+      const pathParts = path.split("/").filter(Boolean);
+      const pathJobId = pathParts.length > 0 ? pathParts[pathParts.length - 1] : null;
+      if (pathJobId && pathJobId !== "comfyui-webhook" && pathJobId !== "images" && pathJobId !== "video") {
+        jobId = pathJobId;
+      }
+    }
+
+    console.log(`[ComfyUI Webhook] Routing callback - isImage: ${isImage}, jobId: ${jobId}`);
+
     try {
         const result = await processComfyUICompletion({
             body,
+            isImage,
+            jobId,
+            queryParams,
             dynamo,
             s3,
             USER_REQUEST_TABLE,

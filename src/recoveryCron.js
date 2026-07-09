@@ -36,6 +36,14 @@ const updateDynamoStatus = async (jobId, userEmail, status, { videoGenerationDur
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
     }));
+    if (status === "FAILED" || status === "COMPLETED") {
+      try {
+        const { sendJobStatusNotification } = require("./lib/telegram");
+        sendJobStatusNotification(jobId, status, { userEmail, error_message });
+      } catch (teleErr) {
+        console.error("[Telegram alert failed]", teleErr.message);
+      }
+    }
   } catch (err) {
     console.error("[Recovery Cron] Dynamo update error:", err.message);
   }
@@ -96,6 +104,30 @@ exports.handler = async (event) => {
                   });
                 }
               } else if (status === "fail" || status === "create_task_failed" || status === "generate_failed") {
+                if (job.sfn_execution_arn) {
+                  const sceneTokenKey = `video_${sceneId}`;
+                  const taskToken = job.sfn_task_tokens?.[sceneTokenKey];
+                  if (taskToken) {
+                    console.log(`[Recovery Cron] Step Functions job detected. Failing task token for ${sceneTokenKey}...`);
+                    const { SFNClient, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
+                    const sfnClient = new SFNClient({ region: process.env.AWS_REGION || "ap-southeast-1" });
+                    try {
+                      await sfnClient.send(new SendTaskFailureCommand({
+                        taskToken,
+                        error: "KieAiGenerationFailed",
+                        cause: resJson.data?.msg || `Kie.ai generation failed for scene ${sceneId}`
+                      }));
+                    } catch (sfnErr) {
+                      console.error(`[Recovery Cron] Failed to send task failure command:`, sfnErr.message);
+                    }
+
+                    await updateDynamoStatus(job.uuid, job.user_email, "RETRYING (video)", {
+                      error_message: resJson.data?.msg || `Kie.ai generation failed for scene ${sceneId}`
+                    });
+                    break;
+                  }
+                }
+
                 await updateDynamoStatus(job.uuid, job.user_email, "FAILED", {
                   error_message: resJson.data.msg || `Kie.ai generation failed for scene ${sceneId}`
                 });
@@ -133,6 +165,15 @@ exports.handler = async (event) => {
               console.log(`[Recovery Cron] Successfully recovered completed job ${job.uuid}`);
             }
           } else if (status === "fail" || status === "create_task_failed" || status === "generate_failed") {
+            if (job.request_type === "MOTION_CONTROL") {
+              const { handleMotionControlFailure } = require("./prompt/motionControl");
+              const retried = await handleMotionControlFailure(job, resJson.data?.msg || "Kie.ai generation failed", dynamo, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET);
+              if (retried) {
+                console.log(`[Recovery Cron] Job ${job.uuid} failed. Triggered retry.`);
+                continue;
+              }
+            }
+
             const videoGenStart = job.video_gen_start_at || job.created_at;
             let videoGenerationDuration = null;
             if (videoGenStart) {
@@ -141,7 +182,7 @@ exports.handler = async (event) => {
             await updateDynamoStatus(job.uuid, job.user_email, "FAILED", {
               videoGenerationDuration,
               error_message: resJson.data.msg || "Kie.ai generation failed"
-            });
+        });
             console.log(`[Recovery Cron] Job ${job.uuid} failed on Kie.ai. Marked as FAILED.`);
           }
         }

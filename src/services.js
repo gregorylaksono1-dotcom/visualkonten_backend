@@ -141,7 +141,6 @@ const resolvePricingRow = async (decodedKey) => {
       Key: { key: k, charge: "default" },
     }));
     if (getRes.Item) {
-      console.log("dapet item:", getRes.Item);
       const n = parseCreditsFromPricingItem(getRes.Item);
       if (Number.isFinite(n) && n > 0) return { amount: n, item: getRes.Item };
     }
@@ -544,11 +543,14 @@ const createTopupOrder = async ({ orderId, userEmail, userId, amount, total, now
   }));
 };
 
-const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now }) => {
+const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now, isFreeTrialUsed }) => {
   try {
     const expressionAttributeValues = { ":z": 0, ":c": finalAmount, ":now": now };
     if (requestType === "FREE-TRIAL") {
       expressionAttributeValues[":one"] = 1;
+    }
+    if (isFreeTrialUsed) {
+      expressionAttributeValues[":zero"] = 0;
     }
 
     await docClient.send(new TransactWriteCommand({
@@ -561,7 +563,9 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
             UpdateExpression:
               requestType === "FREE-TRIAL"
                 ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
+                : (isFreeTrialUsed
+                    ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = :zero, updated_at = :now"
+                    : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now"),
             ConditionExpression:
               requestType === "FREE-TRIAL"
                 ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"

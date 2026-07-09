@@ -213,14 +213,10 @@ async function prepareJobData(payload) {
   };
 }
 
-/**
- * Task: Submit Lock Image.
- * Generates an image or returns success if it is already finished (e.g. references).
- */
 async function submitLockImage(payload) {
   const { jobId, lock, userEmail, userId, taskToken } = payload;
-
   console.log(`[SFN Orchestrator] submitLockImage for jobId ${jobId}, lock id ${lock.id}`);
+  await saveTaskToken(jobId, userEmail, `lock_${lock.id}`, taskToken);
 
   if (lock.isImageFinished && lock.s3key) {
     console.log(`[SFN Orchestrator] Lock ${lock.id} already finished. Continuing immediately.`);
@@ -232,6 +228,13 @@ async function submitLockImage(payload) {
     }));
     return;
   }
+
+  // Fetch request type from DynamoDB
+  const dbResult = await dynamo.send(new GetCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { user_email: userEmail, uuid: jobId }
+  }));
+  const requestType = dbResult.Item?.request_type;
 
   // Generate Lock image via Kie.ai
   const { submitKieImageTask } = require("./stateMachine");
@@ -248,7 +251,8 @@ async function submitLockImage(payload) {
     referenceUrls: [],
     callbackBase,
     kieApiKey,
-    taskToken
+    taskToken,
+    requestType
   });
 
   console.log(`[SFN Orchestrator] Lock Image Task ${taskId} created for lock ${lock.id}`);
@@ -261,11 +265,18 @@ async function submitSceneImage(payload) {
   const { jobId, scene, userEmail, userId, lockResults, taskToken } = payload;
 
   console.log(`[SFN Orchestrator] submitSceneImage for jobId ${jobId}, scene id ${scene.scene_id}`);
+  await saveTaskToken(jobId, userEmail, `image_${scene.scene_id}`, taskToken);
 
   // Resolve dependencies signed S3 URLs
   const referenceUrls = [];
   const dependencies = Array.isArray(scene.dependency) ? scene.dependency : [];
   
+  // Fetch request type from DynamoDB
+  const dbResult = await dynamo.send(new GetCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { user_email: userEmail, uuid: jobId }
+  }));
+  const requestType = dbResult.Item?.request_type;
   for (const depId of dependencies) {
     const lockResult = Array.isArray(lockResults) ? lockResults.find(r => {
       if (!r) return false;
@@ -297,7 +308,8 @@ async function submitSceneImage(payload) {
     referenceUrls,
     callbackBase,
     kieApiKey,
-    taskToken
+    taskToken,
+    requestType
   });
 
   console.log(`[SFN Orchestrator] Scene Image Task ${taskId} created for scene ${scene.scene_id}`);
@@ -310,6 +322,7 @@ async function submitSceneVideo(payload) {
   const { jobId, scene, userEmail, userId, sceneImageResults, audio, audio_duration, aspect_ratio, request_type, llm_response, taskToken } = payload;
 
   console.log(`[SFN Orchestrator] submitSceneVideo for jobId ${jobId}, scene id ${scene.scene_id}`);
+  await saveTaskToken(jobId, userEmail, `video_${scene.scene_id}`, taskToken);
 
   // Find the generated image result for this scene
   const sceneImgResult = Array.isArray(sceneImageResults) ? sceneImageResults.find(r => {
@@ -344,6 +357,7 @@ async function submitSceneVideo(payload) {
     USER_REQUEST_TABLE,
     S3_RESOURCE_BUCKET,
     prompt: scene.video_prompt,
+    negative_prompt: scene.negative_prompt_video || scene.negative_prompt,
     sceneId: scene.scene_id,
     duration: scene.duration_seconds || scene.duration || 5,
     talkvid,
@@ -573,7 +587,7 @@ async function mergeVideoScenes(payload) {
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET video_scenes = :vs, video_scene = :vs, updated_at = :now",
+      UpdateExpression: "SET video_scenes = :vs, updated_at = :now",
       ExpressionAttributeValues: {
         ":vs": videoScenes,
         ":now": getJakartaISOString()
@@ -592,6 +606,37 @@ async function mergeVideoScenes(payload) {
   }
 }
 
+async function saveTaskToken(jobId, userEmail, key, taskToken) {
+  if (!taskToken) return;
+  try {
+    const { UpdateCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
+    // 1. Get the current sfn_task_tokens map
+    const getRes = await dynamo.send(new GetCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      ProjectionExpression: "sfn_task_tokens"
+    }));
+    const currentTokens = getRes.Item?.sfn_task_tokens || {};
+    currentTokens[key] = taskToken;
+
+    // 2. Save back to DynamoDB and reset status to PROCESSING
+    await dynamo.send(new UpdateCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      UpdateExpression: "SET sfn_task_tokens = :tokens, #s = :status, updated_at = :now",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":tokens": currentTokens,
+        ":status": "PROCESSING",
+        ":now": getJakartaISOString()
+      }
+    }));
+    console.log(`[SFN Orchestrator] Saved taskToken for ${key} and set status to PROCESSING`);
+  } catch (err) {
+    console.error(`[SFN Orchestrator] Failed to save taskToken for ${key}:`, err.message);
+  }
+}
+
 module.exports = {
   triggerStateMachine,
   triggerManualRedrive,
@@ -599,5 +644,6 @@ module.exports = {
   submitLockImage,
   submitSceneImage,
   submitSceneVideo,
-  mergeVideoScenes
+  mergeVideoScenes,
+  saveTaskToken
 };

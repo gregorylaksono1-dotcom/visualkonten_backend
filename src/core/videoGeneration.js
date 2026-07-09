@@ -3,7 +3,7 @@
 const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { getJakartaISOString } = require("../utils");
 const { getKieAiKey, s3Client } = require("../services");
-const { uploadToKie, createKieTask } = require("../lib/kie-ai");
+const { uploadToKie, createKieTask, createVeoTask } = require("../lib/kie-ai");
 const { getConfig } = require("../lib/config");
 
 /**
@@ -62,29 +62,44 @@ async function generateComfyUIVideo(params) {
       uploadedAudioUrl = await uploadToKie(signedAudioUrl, kieApiKey);
     }
 
-    const model = "bytedance/seedance-1.5-pro";
-    const motionPrompt = prompt || "Cinematic panning shot, clean product presentation.";
+    const model = "veo3_lite";
+    let motionPrompt = prompt || "Cinematic panning shot, clean product presentation.";
+
+    let resolvedNegativePrompt = params.negative_prompt || "";
+    if (resolvedNegativePrompt) {
+      if (!resolvedNegativePrompt.includes("subtitle")) resolvedNegativePrompt += ", subtitle";
+      if (!resolvedNegativePrompt.includes("caption")) resolvedNegativePrompt += ", caption";
+    } else {
+      resolvedNegativePrompt = "subtitle, caption";
+    }
 
     let resolvedAspectRatio = "9:16";
     if (aspect_ratio === "16:9") resolvedAspectRatio = "16:9";
     else if (aspect_ratio === "1:1") resolvedAspectRatio = "1:1";
 
-    const input = {
-      prompt: motionPrompt,
-      input_urls: [kieImageUrl],
-      generate_audio: isTalkvid,
-      fixed_lens: false,
-      nsfw_checker: false,
-      aspect_ratio: resolvedAspectRatio,
-      duration: duration || 5
-    };
-
-    if (isTalkvid && uploadedAudioUrl) {
-      input.audio = uploadedAudioUrl;
+    // Resolve Veo duration rules: below 5s -> 4s, exactly 5s -> 6s, others direct
+    let resolvedDuration = 4;
+    const d = Number(duration || 5);
+    if (d === 5) {
+      resolvedDuration = 6;
+    } else if (d < 5) {
+      resolvedDuration = 4;
+    } else {
+      resolvedDuration = d;
     }
 
-    console.log(`[VideoGen] Calling Kie.ai createTask for ${model}...`);
-    const taskId = await createKieTask(model, input, callBackUrl, kieApiKey);
+    // Append negative constraints directly into the main prompt since Veo doesn't support a separate field
+    motionPrompt = `${motionPrompt.trim()}, avoid ${resolvedNegativePrompt}`;
+
+    const input = {
+      prompt: motionPrompt,
+      imageUrls: [kieImageUrl],
+      aspect_ratio: resolvedAspectRatio,
+      duration: resolvedDuration
+    };
+
+    console.log(`[VideoGen] Calling Kie.ai createVeoTask for ${model} with duration: ${resolvedDuration}s...`);
+    const taskId = await createVeoTask(model, input, callBackUrl, kieApiKey);
     console.log(`[VideoGen] Successfully created task ${taskId} for Scene ${activeSceneId}`);
 
     return taskId;

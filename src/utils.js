@@ -73,6 +73,8 @@ const extFromContentType = (ct) => {
   if (c.includes("png")) return "png";
   if (c.includes("webp")) return "webp";
   if (c.includes("gif")) return "gif";
+  if (c.includes("mp4")) return "mp4";
+  if (c.includes("quicktime") || c.includes("mov")) return "mov";
   return "jpg";
 };
 
@@ -97,7 +99,18 @@ const pathEndsWithResource = (event, suffix) => {
 
 const parseCreditsFromPricingItem = (item) => {
   if (!item) return NaN;
-  const raw = item.amount ?? item.credits ?? item.charge;
+  let raw = item.amount ?? item.credits ?? item.charge;
+  
+  if (item.attr) {
+    let parsedAttr = null;
+    try {
+      parsedAttr = typeof item.attr === "string" ? JSON.parse(item.attr) : item.attr;
+    } catch (e) { }
+    if (parsedAttr && parsedAttr["720"] !== undefined) {
+      raw = parsedAttr["720"];
+    }
+  }
+
   if (raw === undefined || raw === null || raw === "") return NaN;
   const n = Math.round(Number(String(raw).trim()));
   return n;

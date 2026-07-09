@@ -65,6 +65,14 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
     }));
+    if (status === "FAILED" || status === "COMPLETED") {
+      try {
+        const { sendJobStatusNotification } = require("./lib/telegram");
+        sendJobStatusNotification(jobId, status, { userEmail, error_message, resultUrl });
+      } catch (teleErr) {
+        console.error("[Telegram alert failed]", teleErr.message);
+      }
+    }
   } catch (err) {
     console.error("[Kie.ai Worker] Dynamo update error:", err.message);
   }
@@ -124,6 +132,30 @@ const checkSingleJobStatus = async (job) => {
               });
             }
           } else if (status === "fail" || status === "create_task_failed" || status === "generate_failed") {
+            if (job.sfn_execution_arn) {
+              const sceneTokenKey = `video_${sceneId}`;
+              const taskToken = job.sfn_task_tokens?.[sceneTokenKey];
+              if (taskToken) {
+                console.log(`[Poller] Step Functions job detected. Failing task token for ${sceneTokenKey}...`);
+                const { SFNClient, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
+                const sfnClient = new SFNClient({ region: process.env.AWS_REGION || "ap-southeast-1" });
+                try {
+                  await sfnClient.send(new SendTaskFailureCommand({
+                    taskToken,
+                    error: "KieAiGenerationFailed",
+                    cause: resJson.data?.msg || `Kie.ai generation failed for scene ${sceneId}`
+                  }));
+                } catch (sfnErr) {
+                  console.error(`[Poller] Failed to send task failure command:`, sfnErr.message);
+                }
+
+                await updateDynamoStatus(job.uuid, job.user_email, "RETRYING (video)", {
+                  error_message: resJson.data?.msg || `Kie.ai generation failed for scene ${sceneId}`
+                });
+                break;
+              }
+            }
+
             await updateDynamoStatus(job.uuid, job.user_email, "FAILED", {
               error_message: resJson.data.msg || `Kie.ai generation failed for scene ${sceneId}`
             });
@@ -157,6 +189,12 @@ const checkSingleJobStatus = async (job) => {
           });
         }
       } else if (status === "fail" || status === "create_task_failed" || status === "generate_failed") {
+        if (job.request_type === "MOTION_CONTROL") {
+          const { handleMotionControlFailure } = require("./prompt/motionControl");
+          const retried = await handleMotionControlFailure(job, resJson.data?.msg || "Kie.ai generation failed", dynamo, USER_REQUEST_TABLE, S3_RESOURCE_BUCKET);
+          if (retried) return;
+        }
+
         const videoGenStart = job.video_gen_start_at || job.created_at;
         let videoGenerationDuration = null;
         if (videoGenStart) {
@@ -202,6 +240,29 @@ const handleSubmission = async (event) => {
   }
 
   // ─── Key Routing for Custom Handlers ──────────────────────────────────────────
+  if (requestType === "MOTION_CONTROL") {
+    console.log(`[Worker] Starting MOTION_CONTROL task submission for job ${jobId}`);
+    try {
+      const { submitMotionControlTask } = require("./prompt/motionControl");
+      await submitMotionControlTask({
+        jobId,
+        userEmail,
+        userId: event.userId,
+        s3ImageUrls,
+        videoRefKey: event.video_ref_key || existingJob.video_ref_key,
+        duration: event.duration_seconds || 5,
+        dynamo,
+        USER_REQUEST_TABLE,
+        S3_RESOURCE_BUCKET
+      });
+      return;
+    } catch (err) {
+      console.error(`[Worker] Error executing motion control handler for job ${jobId}:`, err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+      return;
+    }
+  }
+
   if (requestType === "TESTIMONY_TULUS") {
     console.log(`[Worker] Generating Testimony LLM response for job ${jobId}`);
     try {
@@ -258,7 +319,35 @@ const handleSubmission = async (event) => {
     }
   }
 
-  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || requestType === "TESTIMONY_TULUS" || requestType === "ANIMASI_1";
+  if (requestType === "UGC_PROBLEM_SOLUTION") {
+    console.log(`[Worker] Generating UGC Problem Solution LLM response for job ${jobId}`);
+    try {
+      const { handleUgcProblemSolution } = require("./prompt/ugcProblemSolution");
+      const llmResponse = await handleUgcProblemSolution({
+        jobId,
+        userEmail,
+        userId: event.userId,
+        currentS3ImageUrls,
+        prompt,
+        videoQuality,
+        aspectRatio,
+        S3_RESOURCE_BUCKET,
+        dynamo,
+        s3: s3Client,
+        USER_REQUEST_TABLE,
+        preview: preview || false,
+        existingJob
+      });
+      existingJob.llm_response = llmResponse;
+      console.log(`[Worker] UGC Problem Solution LLM response generated successfully. Proceeding to state machine.`);
+    } catch (err) {
+      console.error(`[Worker] Error executing UGC Problem Solution handler for job ${jobId}:`, err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+      return;
+    }
+  }
+
+  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || requestType === "TESTIMONY_TULUS" || requestType === "ANIMASI_1" || requestType === "UGC_PROBLEM_SOLUTION";
   const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
 
   if (isUgcMode || isProductCinematic) {

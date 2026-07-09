@@ -207,6 +207,12 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
       }
     }));
     console.log(`[FFmpeg Merge] Job ${job.uuid} successfully completed!`);
+    try {
+      const { sendJobStatusNotification } = require("../lib/telegram");
+      sendJobStatusNotification(job.uuid, "COMPLETED", { userEmail: job.user_email, resultUrl: s3Key });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
 
     inputPaths.forEach(p => { try { fs.unlinkSync(p); } catch { } });
     try { fs.unlinkSync(listPath); } catch { }
@@ -225,13 +231,19 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
         ":now": getJakartaISOString()
       }
     }));
+    try {
+      const { sendJobStatusNotification } = require("../lib/telegram");
+      sendJobStatusNotification(job.uuid, "FAILED", { userEmail: job.user_email, error_message: `Video merge failed: ${err.message}` });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
   }
 }
 
 /**
  * Submits a Flux-2 image generation task to Kie.ai
  */
-async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, referenceUrls, callbackBase, kieApiKey, taskToken }) {
+async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, referenceUrls, callbackBase, kieApiKey, taskToken, requestType }) {
   const callbackBaseNormalized = callbackBase.endsWith("/") ? callbackBase.slice(0, -1) : callbackBase;
   let callBackUrl = `${callbackBaseNormalized}/images?request-id=${jobId}&type=${type}&id=${id}`;
   if (taskToken) {
@@ -239,19 +251,32 @@ async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, ref
   }
 
   let resolvedAspectRatio = "9:16";
-  let model = "flux-2/pro-text-to-image";
+  const hasImages = Array.isArray(referenceUrls) && referenceUrls.length > 0;
+  
+  let model;
+  if (requestType === "ANIMASI_1" || requestType === "problemsolutionAnimation") {
+    model = "nano-banana-2-lite";
+  } else {
+    model = hasImages ? "gpt-image-2-image-to-image" : "gpt-image-2-text-to-image";
+  }
   const input = {
     prompt,
-    negative_prompt: negativePrompt || "",
-    aspect_ratio: resolvedAspectRatio,
-    resolution: "1K",
-    nsfw_checker: false
+    aspect_ratio: resolvedAspectRatio
   };
 
-  if (Array.isArray(referenceUrls) && referenceUrls.length > 0 && referenceUrls[0]) {
-    model = "flux-2/pro-image-to-image";
-    const kieRefUrl = await uploadToKie(referenceUrls[0], kieApiKey);
-    input.input_urls = [kieRefUrl];
+  if (hasImages) {
+    const kieRefUrls = [];
+    for (const refUrl of referenceUrls) {
+      if (refUrl) {
+        const kieRefUrl = await uploadToKie(refUrl, kieApiKey);
+        kieRefUrls.push(kieRefUrl);
+      }
+    }
+    if (kieRefUrls.length > 0) {
+      input.imageUrls = kieRefUrls; // Just in case, standard Kie API parameter
+      input.image_urls = kieRefUrls; // Used previously by nano-banana-2-lite
+      input.input_urls = kieRefUrls; // Used specifically by gpt-image-2-image-to-image
+    }
   }
 
   console.log(`[Kie.ai Image Task] Creating task for type ${type}, id ${id}, model ${model}`);
@@ -659,7 +684,7 @@ async function handleVideoCallback({ jobId, sceneId, resultUrl, dynamo, s3, USER
   await dynamo.send(new UpdateCommand({
     TableName: USER_REQUEST_TABLE,
     Key: { uuid: jobId, user_email: jobData.user_email },
-    UpdateExpression: "SET video_scenes = :vs, video_scene = :vs, build_queue = :bq, updated_at = :now",
+    UpdateExpression: "SET video_scenes = :vs, build_queue = :bq, updated_at = :now",
     ExpressionAttributeValues: {
       ":vs": videoScenes,
       ":bq": buildQueue,

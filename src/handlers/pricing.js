@@ -14,7 +14,8 @@ exports.handleGetPricing = async (event, pricingKeyParam) => {
       charge: resolved.item.charge, 
       amount: resolved.amount, 
       attr: resolved.item.attr,
-      description: resolved.item.description || null
+      description: resolved.item.description || null,
+      coming_soon: resolved.item.coming_soon === true || resolved.item.coming_soon === "true"
     },
   });
 };
@@ -22,7 +23,8 @@ exports.handleGetPricing = async (event, pricingKeyParam) => {
 exports.handleListPricing = async (event) => {
   try {
     const rows = await listAllPricingRows();
-    const formatted = rows.map((item) => {
+    const activeRows = rows.filter(item => item.disabled !== true && item.disabled !== "true");
+    const formatted = activeRows.map((item) => {
       let categories = [];
       if (item.category) {
         if (item.category instanceof Set) {
@@ -46,6 +48,7 @@ exports.handleListPricing = async (event) => {
         caption: item.caption,
         description: item.description || null,
         popularity: item.popularity !== undefined ? Number(item.popularity) : 0,
+        coming_soon: item.coming_soon === true || item.coming_soon === "true",
       };
     });
     return response(200, { data: formatted });

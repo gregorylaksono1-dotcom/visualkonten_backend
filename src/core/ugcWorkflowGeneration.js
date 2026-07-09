@@ -99,11 +99,11 @@ async function generateMultiScenePipeline(params) {
       };
     });
 
-    // 4. Update DynamoDB status to PROCESSING and save video_scenes (both video_scenes and video_scene)
+    // 4. Update DynamoDB status to PROCESSING and save video_scenes
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET video_scenes = :vs, video_scene = :vs, comfy_prompt_id = :cp, #s = :status, updated_at = :now, video_gen_start_at = :now",
+      UpdateExpression: "SET video_scenes = :vs, comfy_prompt_id = :cp, #s = :status, updated_at = :now, video_gen_start_at = :now",
       ExpressionAttributeNames: { "#s": "status" },
       ExpressionAttributeValues: {
         ":vs": videoScenes,

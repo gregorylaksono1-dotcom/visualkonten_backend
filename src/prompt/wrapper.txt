@@ -39,6 +39,8 @@ Dari BUILDER + brief produk yang diberikan user, hasilkan **SATU objek JSON** ik
 - Motion: 1 gerakan/scene, product stays solid; state-change pakai CUT bukan simulasi (§6, §7).
 - Beauty: tangan yang gerak (bukan produk), gerak pelan, no marketing words (§8).
 - Voice via PROMPT (no TTS): lip-sync/VO di video_prompt, "no music", word count sesuai durasi, pelafalan (§9, §10).
+- **TIAP scene ADA yang bicara** (talent lip-sync ATAU voiceover) — no scene bisu (§9).
+- **Top-level `caption`** ada (tiktok/instagram/shopee), claim-safe (§13b).
 - Lokalisasi Indonesia (§11) · claim-safe (§12) · teks/logo = overlay post, jangan di-generate (§13).
 
 Sisa dari system ini adalah RULES MASTER ⬇️ (tempel isi _RULES_MASTER.md di bawah baris ini)

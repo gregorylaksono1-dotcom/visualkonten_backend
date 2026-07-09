@@ -73,21 +73,16 @@ async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
     }
   }
 
-  let model;
+  const model = "nano-banana-2-lite";
   const input = {
     prompt,
-    aspect_ratio: resolvedAspectRatio,
-    resolution: "1K",
-    nsfw_checker: false
+    aspect_ratio: resolvedAspectRatio
   };
 
   if (hasReference) {
-    model = "flux-2/pro-image-to-image";
     // Upload reference image to Kie.ai first
     const kieRefUrl = await uploadToKie(referenceUrls[0], kieApiKey);
-    input.input_urls = [kieRefUrl];
-  } else {
-    model = "flux-2/pro-text-to-image";
+    input.image_urls = [kieRefUrl];
   }
 
   console.log(`[Kie.ai ImageGen] Creating task for model ${model} with prompt: "${prompt.slice(0, 100)}..."`);

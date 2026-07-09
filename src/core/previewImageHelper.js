@@ -4,6 +4,8 @@ const { getFalAiKey, getSignedUrl } = require("../services");
 const { callOpenAIImageEdit } = require("./imageGenerationOpenAI");
 const { getJakartaISOString } = require("../utils");
 
+const BYPASS_IMAGE_GENERATION = false; // Set to true to skip OpenAI calls and mock preview assets for fast testing
+
 const DEFAULT_ANTI_STUDIO_NEGATIVE =
   "stock photo, catalog photo, studio lighting, commercial photography, beauty retouching, flawless skin, magazine shoot, fashion campaign, professional model, glamour portrait, CGI, 3D render, tabloid photo, airbrushed skin, porcelain skin, editorial fashion, catalog look, professional studio backdrop, plastic skin, perfect symmetry";
 
@@ -60,6 +62,37 @@ async function generatePreviewAssets(params) {
   } = params;
 
   console.log(`[PreviewHelper] Starting preview asset generation for job ${jobId}`);
+
+  if (BYPASS_IMAGE_GENERATION) {
+    console.log(`[PreviewHelper] [BYPASS] Skipping OpenAI image generation for testing.`);
+    const scenes = llmResponse.scene || llmResponse.scenes || [];
+    const generatedScenes = [];
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
+      const sceneId = scene.scene_id || (i + 1);
+      generatedScenes.push({
+        scene_id: sceneId,
+        s3_key: null,
+        url: currentS3ImageUrls[0] || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/library/default_talent.png"
+      });
+    }
+    const startTime = params.startTime || Date.now();
+    const previewDuration = Math.round((Date.now() - startTime) / 1000);
+    await dynamo.send(new UpdateCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail },
+      UpdateExpression: "SET generated_image = :genImg, generated_scenes = :genScenes, #s = :status, updated_at = :now, preview_duration = :prevDur",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":genImg": null,
+        ":genScenes": generatedScenes,
+        ":status": "PREVIEW",
+        ":now": getJakartaISOString(),
+        ":prevDur": previewDuration
+      }
+    }));
+    return { success: true };
+  }
 
   const apiKey = await getFalAiKey();
   if (!apiKey) {

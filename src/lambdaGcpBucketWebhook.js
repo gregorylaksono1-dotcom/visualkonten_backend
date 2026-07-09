@@ -195,6 +195,13 @@ async function updateUserRequestCompleted(jobId, s3Key) {
       ExpressionAttributeValues: exprValues,
     })
   );
+
+  try {
+    const { sendJobStatusNotification } = require("./lib/telegram");
+    sendJobStatusNotification(jobId, "COMPLETED", { userEmail: item.user_email, resultUrl: s3Key });
+  } catch (teleErr) {
+    console.error("[Telegram alert failed]", teleErr.message);
+  }
 }
 
 exports.handler = async (event) => {

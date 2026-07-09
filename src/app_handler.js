@@ -437,12 +437,25 @@ exports.handler = async (event) => {
           error: `Pricing belum dikonfigurasi untuk "${pricingKey}". Tambahkan baris di tabel pricing (PK key, SK charge, atribut amount Number).`,
         });
       }
-      const creditAmount = pricingResolved.amount;
-
       const videoQuality =
         resourceFamily === "video" ? normalizeVideoQuality(body.video_quality) : null;
       const aspectRatio =
         resourceFamily === "video" ? normalizeAspectRatio(body.aspect_ratio) : null;
+
+      let creditAmount = pricingResolved.amount;
+      if (pricingResolved.item && pricingResolved.item.attr) {
+        let parsedAttr = null;
+        try {
+          parsedAttr = typeof pricingResolved.item.attr === "string" ? JSON.parse(pricingResolved.item.attr) : pricingResolved.item.attr;
+        } catch (e) { }
+        if (parsedAttr) {
+          const vq = videoQuality || "720p";
+          const qNum = vq.replace("p", "");
+          if (parsedAttr[qNum] !== undefined) {
+            creditAmount = Number(parsedAttr[qNum]);
+          }
+        }
+      }
 
       const videoOptions =
         resourceFamily === "video" && videoQuality && aspectRatio

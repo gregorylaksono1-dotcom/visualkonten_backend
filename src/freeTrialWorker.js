@@ -40,6 +40,12 @@ const saveWorkflowAndFailConcurrency = async (jobId, userEmail, workflow, errorM
       },
     }));
     console.log(`[Worker] Updated DynamoDB status to FAILED_CONCCURENCY for job ${jobId}`);
+    try {
+      const { sendJobStatusNotification } = require("./lib/telegram");
+      sendJobStatusNotification(jobId, "FAILED_CONCCURENCY", { userEmail, error_message: errorMsg || "Concurrency limit exceeded" });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
   } catch (dbErr) {
     console.error(`[Worker] Failed to update DynamoDB status to FAILED_CONCCURENCY:`, dbErr.message);
   }
@@ -90,6 +96,12 @@ exports.handler = async (event) => {
               },
             })
           );
+          try {
+            const { sendJobStatusNotification } = require("./lib/telegram");
+            sendJobStatusNotification(jobId, "FAILED", { userEmail, error_message: err?.message || "FREE-TRIAL process failed" });
+          } catch (teleErr) {
+            console.error("[Telegram alert failed]", teleErr.message);
+          }
         }
       } catch (dErr) {
         console.error("[FreeTrialWorker] Dynamo update error:", dErr);

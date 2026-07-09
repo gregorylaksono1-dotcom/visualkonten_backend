@@ -39,6 +39,10 @@ exports.handler = async (event) => {
       const { handleGetPresigned } = require("./handlers/resource");
       return handleGetPresigned(event);
     }
+    if (path.startsWith("/mock-kieai")) {
+      const { handleMockKieAi } = require("./handlers/mockKieAi");
+      return handleMockKieAi(event);
+    }
 
     return response(404, { error: `Route ${route} not found.` });
   } catch (err) {

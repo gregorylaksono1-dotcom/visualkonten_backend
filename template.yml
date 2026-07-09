@@ -582,6 +582,24 @@ Resources:
             Method: get
             Auth:
               Authorizer: NONE
+        MockKieAi:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /mock-kieai
+            Method: any
+            Auth:
+              Authorizer: NONE
+        MockKieAiProxy:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /mock-kieai/{proxy+}
+            Method: any
+            Auth:
+              Authorizer: NONE
     Metadata:
       SamResourceId: HelloWorldFunction
   CognitoPostAuthTriggerFunction:
@@ -752,35 +770,50 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: comfyuiWorker.handler
+      Handler: videoGenerator.handler
       Runtime: nodejs22.x
       Timeout: 600
-      MemorySize: 256
+      MemorySize: 1024
       Architectures:
       - x86_64
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: UserRequestTable
+      - DynamoDBCrudPolicy:
+          TableName: !Ref PricingTable
       - AWSLambdaBasicExecutionRole
       - Version: '2012-10-17'
         Statement:
-        - Effect: Allow
-          Action:
-          - s3:PutObject
-          - s3:GetObject
-          Resource:
-            Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
-      - Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Action:
-          - ssm:GetParameter
-          - ssm:GetParameters
-          - ssm:GetParametersByPath
-          Resource:
-          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
-          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PricingTable}
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource:
+              Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Resource:
+              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+              - states:RedriveExecution
+              - states:StopExecution
+              - states:DescribeExecution
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+            Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
       Environment:
         Variables:
           CONFIG_SSM_PATH:
@@ -800,13 +833,10 @@ Resources:
             Ref: UsePromptRefactor
           RUNPOD:
             Ref: Runpod
-      Events:
-        ComfyUIPollSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(1 minute)
-            Description: Poll ComfyUI Cloud status for processing jobs
-            Enabled: true
+          PRICING_TABLE_NAME:
+            Ref: PricingTable
+          STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
+
     Metadata:
       SamResourceId: ComfyUIWorkerFunction
   CognitoInvokePermissionForPostAuth:
@@ -833,14 +863,31 @@ Resources:
           TableName: !Ref UserRequestTable
       - S3CrudPolicy:
           BucketName: !Ref S3ResourceBucketName
+      - Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Resource:
+              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+          - Effect: Allow
+            Action:
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+            Resource: "*"
       Environment:
         Variables:
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
           S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
           VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
           UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
           UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
       Events:
         ComfyUIWebhookEvent:
           Type: Api
@@ -850,40 +897,56 @@ Resources:
             RestApiId: !Ref Api
             Auth:
               Authorizer: NONE # Webhook usually doesn't have Cognito auth
+        ComfyUIWebhookEventProxy:
+          Type: Api
+          Properties:
+            Path: /comfyui-webhook/{proxy+}
+            Method: post
+            RestApiId: !Ref Api
+            Auth:
+              Authorizer: NONE
+
   RecoveryCronFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: recoveryCron.handler
       Runtime: nodejs22.x
-      Timeout: 900 # 15 minutes timeout to allow downloads
+      Timeout: 900
       MemorySize: 512
       Architectures:
-        - x86_64
+      - x86_64
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UserRequestTable
-        - S3CrudPolicy:
-            BucketName: !Ref S3ResourceBucketName
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - ssm:GetParameter
-                - ssm:GetParameters
-                - ssm:GetParametersByPath
-              Resource:
-                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}'
-                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: UserRequestTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: S3ResourceBucketName
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
-          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME:
+            Ref: UserRequestTable
+          S3_RESOURCE_BUCKET:
+            Ref: S3ResourceBucketName
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
           VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
-          CONFIG_SSM_PATH: !Ref ConfigSsmPath
-          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
-          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
+          UPSTASH_REDIS_REST_URL:
+            Ref: UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN:
+            Ref: UpstashRedisRestToken
       Events:
         TwoMinuteCronEvent:
           Type: Schedule
@@ -891,8 +954,20 @@ Resources:
             Schedule: rate(2 minutes)
             Description: Recover stalled jobs and retry concurrency failures
             Enabled: true
-    Metadata:
-      SamResourceId: RecoveryCronFunction
+
+  VideoGenerationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub BikinAi-VideoGeneration${EnvironmentSuffix}
+      DefinitionUri: statemachine/video_generation.asl.json
+      DefinitionSubstitutions:
+        ComfyUIWorkerFunctionArn: !GetAtt ComfyUIWorkerFunction.Arn
+        UserRequestTableName: !Ref UserRequestTable
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ComfyUIWorkerFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
 
 Outputs:
   ApiEndpoint:
@@ -941,5 +1016,8 @@ Outputs:
     Description: Webhook URL for GCP Pub/Sub fileCreated push
     Value:
       Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/gcp/bucket-webhook
+  VideoGenerationStateMachineArn:
+    Description: ARN of the Step Functions Video Generation State Machine
+    Value: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
 
 # sam build && sam deploy --config-env production --profile production

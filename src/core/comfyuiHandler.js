@@ -102,6 +102,12 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
       }
     }));
     console.log(`[FFmpeg Merge] Job ${job.uuid} successfully completed!`);
+    try {
+      const { sendJobStatusNotification } = require("../lib/telegram");
+      sendJobStatusNotification(job.uuid, "COMPLETED", { userEmail: job.user_email, resultUrl: s3Key });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
 
     inputPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
     try { fs.unlinkSync(listPath); } catch {}
@@ -120,6 +126,12 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
         ":now": getJakartaISOString()
       }
     }));
+    try {
+      const { sendJobStatusNotification } = require("../lib/telegram");
+      sendJobStatusNotification(job.uuid, "FAILED", { userEmail: job.user_email, error_message: `Video merge failed: ${err.message}` });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
   }
 }
 
@@ -304,6 +316,15 @@ async function processKieAiCompletion(params) {
     ExpressionAttributeNames: Object.keys(attrNames).length > 0 ? attrNames : undefined
   }));
 
+  if (isVideo) {
+    try {
+      const { sendJobStatusNotification } = require("../lib/telegram");
+      sendJobStatusNotification(jobId, "COMPLETED", { userEmail, resultUrl: s3Key });
+    } catch (teleErr) {
+      console.error("[Telegram alert failed]", teleErr.message);
+    }
+  }
+
   return { success: true, s3Key };
 }
 
@@ -315,12 +336,59 @@ async function processComfyUICompletion(params) {
   
   const { findMediaUrlInKieData } = require("../lib/kie-ai");
   const resultUrl = findMediaUrlInKieData(body);
+  const taskToken = queryParams?.taskToken;
+
   if (!resultUrl) {
     console.error(`[ComfyUI Webhook] No media URL found in Kie.ai callback: ${JSON.stringify(body)}`);
+    if (taskToken) {
+      console.log(`[ComfyUI Webhook] Kie.ai task failed. Sending SendTaskFailureCommand to Step Functions.`);
+      const { SFNClient, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
+      const sfnClient = new SFNClient({ region: process.env.AWS_REGION || "ap-southeast-1" });
+      
+      const errorMsg = body.msg || "Kie.ai generation failed";
+      const errorCode = String(body.code || "KieAiError");
+      
+      try {
+        await sfnClient.send(new SendTaskFailureCommand({
+          taskToken,
+          error: errorCode,
+          cause: errorMsg
+        }));
+      } catch (sfnErr) {
+        console.error(`[ComfyUI Webhook] Failed to send task failure:`, sfnErr.message);
+      }
+
+      // Update DynamoDB job status to RETRYING (video/image) to avoid poller/recovery double retry
+      const retryingStatus = isImage ? "RETRYING (image)" : "RETRYING (video)";
+      console.log(`[ComfyUI Webhook] Updating job ${jobId} status to ${retryingStatus}`);
+      try {
+        const { UpdateCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
+        let userEmail = queryParams?.userEmail;
+        if (!userEmail) {
+          const qRes = await dynamo.send(new QueryCommand({
+            TableName: USER_REQUEST_TABLE,
+            KeyConditionExpression: "#uuid = :u",
+            ExpressionAttributeNames: { "#uuid": "uuid" },
+            ExpressionAttributeValues: { ":u": jobId }
+          }));
+          userEmail = qRes.Items?.[0]?.user_email;
+        }
+        if (userEmail) {
+          await dynamo.send(new UpdateCommand({
+            TableName: USER_REQUEST_TABLE,
+            Key: { uuid: jobId, user_email: userEmail },
+            UpdateExpression: "SET #s = :s, updated_at = :u",
+            ExpressionAttributeNames: { "#s": "status" },
+            ExpressionAttributeValues: { ":s": retryingStatus, ":u": getJakartaISOString() }
+          }));
+        }
+      } catch (dbErr) {
+        console.error(`[ComfyUI Webhook] Failed to update job status to ${retryingStatus}:`, dbErr.message);
+      }
+    }
     return { success: false, message: "No media URL in callback" };
   }
 
-  const taskToken = queryParams?.taskToken;
   if (taskToken) {
     console.log(`[ComfyUI Webhook] Found taskToken, handling callback via Step Functions Task Token`);
     const { SFNClient, SendTaskSuccessCommand, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
@@ -359,6 +427,31 @@ async function processComfyUICompletion(params) {
         const subfolder = type === "lock" ? "locks" : "scenes";
         s3Key = `generated_image/${userId}/${subfolder}/${jobId}_${id}.png`;
         outputObj = { s3key: s3Key, id, type };
+
+        // Save scene image key to generated_scenes in DynamoDB for storyboard display
+        if (type === "imagesScene" && jobData) {
+          console.log(`[ComfyUI Webhook SFN Callback] Saving scene ${id} to DynamoDB generated_scenes`);
+          let dbScenes = Array.isArray(jobData.generated_scenes) ? [...jobData.generated_scenes] : [];
+          const existingIdx = dbScenes.findIndex(s => String(s.scene_id) === String(id));
+          if (existingIdx !== -1) {
+            dbScenes[existingIdx].s3_key = s3Key;
+            delete dbScenes[existingIdx].url; // Clear temporary url if any
+          } else {
+            dbScenes.push({
+              scene_id: Number(id),
+              s3_key: s3Key
+            });
+          }
+          await dynamo.send(new UpdateCommand({
+            TableName: USER_REQUEST_TABLE,
+            Key: { uuid: jobId, user_email: jobData.user_email },
+            UpdateExpression: "SET generated_scenes = :gs, updated_at = :now",
+            ExpressionAttributeValues: {
+              ":gs": dbScenes,
+              ":now": getJakartaISOString()
+            }
+          }));
+        }
       } else {
         const sceneId = queryParams.sceneId || 1;
         s3Key = `generated_videos/${userId}/scenes/${jobId}_scene_${sceneId}.mp4`;

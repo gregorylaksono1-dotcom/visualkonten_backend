@@ -45,6 +45,10 @@ exports.handlePostResource = async (event) => {
         return response(400, { error: "Request is not in a valid state for generation." });
       }
 
+      const profileItem = await getCustomerProfile(userId);
+      const isFreeTrial = Number(profileItem.free_trial || 0) === 1;
+      let isFreeTrialUsed = false;
+
       const pricing = await resolvePricingRow(requestItem.request_type);
       if (!pricing) return response(404, { error: `Pricing not found for request type ${requestItem.request_type}.` });
 
@@ -53,21 +57,25 @@ exports.handlePostResource = async (event) => {
       const aspectRatio = requestItem.aspect_ratio || "9:16";
 
       const requestTypeUpper = String(requestItem.request_type || "").toUpperCase();
-      if ((requestTypeUpper === "UGC-P" || requestTypeUpper === "UGC-S" || requestTypeUpper === "UGC-PRESENTER" || requestTypeUpper.startsWith("UGC-") || requestTypeUpper === "PRODUCT-CINEMATIC" || requestTypeUpper === "PRODUCT-CINEMATIK") && pricing.item.attr) {
+      if (pricing.item.attr) {
         let parsedAttr = null;
         try {
           parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
         } catch (e) { }
         if (parsedAttr) {
-          const qNum = videoQuality.replace("p", "");
-          const attrKey = `${qNum}`;
-          if (parsedAttr[attrKey] !== undefined) {
-            finalAmount = Number(parsedAttr[attrKey]);
+          if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+            finalAmount = Number(parsedAttr["freetrial"]);
+            isFreeTrialUsed = true;
+          } else {
+            const qNum = videoQuality.replace("p", "");
+            const attrKey = `${qNum}`;
+            if (parsedAttr[attrKey] !== undefined) {
+              finalAmount = Number(parsedAttr[attrKey]);
+            }
           }
         }
       }
 
-      const profileItem = await getCustomerProfile(userId);
       const profileCreditBalance = Number(profileItem.credit_balance || 0);
       if (!(profileCreditBalance >= finalAmount)) {
         return response(402, {
@@ -125,8 +133,25 @@ exports.handlePostResource = async (event) => {
           delete putItem.audio_duration;
         }
 
-        // Save the updated llm_response
-        putItem.llm_response = body.llm_response;
+        // Safely merge only the fields the frontend is allowed to edit (TTS/voiceover)
+        const existingLlm = requestItem.llm_response || {};
+        const newLlm = body.llm_response;
+        
+        if (newLlm.tts_script !== undefined) existingLlm.tts_script = newLlm.tts_script;
+        if (newLlm.voiceover_script !== undefined) existingLlm.voiceover_script = newLlm.voiceover_script;
+        
+        const existingScenes = existingLlm.scene || existingLlm.scenes || [];
+        const newScenes = newLlm.scene || newLlm.scenes || [];
+        
+        for (let i = 0; i < existingScenes.length; i++) {
+          if (newScenes[i]) {
+             if (newScenes[i].tts_script !== undefined) existingScenes[i].tts_script = newScenes[i].tts_script;
+             if (newScenes[i].voiceover_script !== undefined) existingScenes[i].voiceover_script = newScenes[i].voiceover_script;
+             if (newScenes[i].voiceover !== undefined) existingScenes[i].voiceover = newScenes[i].voiceover;
+             if (newScenes[i].tts !== undefined) existingScenes[i].tts = newScenes[i].tts;
+          }
+        }
+        putItem.llm_response = existingLlm;
       }
 
       const errRes = await executeResourceRequestTransaction({
@@ -134,7 +159,8 @@ exports.handlePostResource = async (event) => {
         finalAmount,
         userId,
         requestType: requestItem.request_type,
-        now
+        now,
+        isFreeTrialUsed
       });
       if (errRes) return errRes;
 
@@ -176,7 +202,7 @@ exports.handlePostResource = async (event) => {
     }
   }
 
-  const prompt = String(body.prompt || "").trim();
+  let prompt = String(body.prompt || "").trim();
   const imageBase64_1 = body.image_base64_1 || body.image_base_64_1 || body.image_base64 || "";
   const imageBase64_2 = body.image_base64_2 || body.image_base_64_2 || "";
   const hasImage = Boolean(imageBase64_1.trim() || imageBase64_2.trim());
@@ -226,26 +252,67 @@ exports.handlePostResource = async (event) => {
     pricingKey = "PREVIEW";
   }
 
+  if (!prompt && requestType === "MOTION_CONTROL") {
+    prompt = "MOTION_CONTROL";
+  }
+
   if (!prompt) return response(400, { error: "prompt is required." });
   if (requestType === "FREE-TRIAL" && !hasImage) {
     return response(400, { error: "FREE-TRIAL memerlukan minimal 1 gambar input." });
   }
 
+  if (requestType === "MOTION_CONTROL") {
+    const refVideoDuration = Number(body.ref_video_duration || 0);
+    const chosenDuration = Number(body.duration_seconds || 10);
+    if (refVideoDuration < chosenDuration) {
+      return response(400, {
+        error: "Durasi video referensi lebih kecil dibanding durasi yang dipilih.",
+        error_code: "VIDEO_DURATION_TOO_SHORT"
+      });
+    }
+  }
+
   const pricing = await resolvePricingRow(pricingKey);
   if (!pricing) return response(404, { error: `Pricing not found for ${pricingKey}.` });
 
+  if (pricing.item.coming_soon === true || pricing.item.coming_soon === "true") {
+    return response(400, { error: "Template ini belum siap untuk diproses (Coming Soon)." });
+  }
+
+  const profileItem = await getCustomerProfile(userId);
+  const isFreeTrial = Number(profileItem.free_trial || 0) === 1;
+  let isFreeTrialUsed = false;
+
   let finalAmount = pricing.amount;
   const requestTypeUpperVal = String(requestType || "").toUpperCase();
-  if ((isPreview || requestTypeUpperVal === "UGC-P" || requestTypeUpperVal === "UGC-S" || requestTypeUpperVal === "UGC-PRESENTER" || requestTypeUpperVal.startsWith("UGC-") || requestTypeUpperVal === "PRODUCT-CINEMATIC" || requestTypeUpperVal === "PRODUCT-CINEMATIK") && pricing.item.attr) {
+  if (requestTypeUpperVal === "MOTION_CONTROL") {
+    let parsedAttr = null;
+    try {
+      parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
+    } catch (e) { }
+    const chosenDur = String(body.duration_seconds || 10);
+    if (!parsedAttr || parsedAttr[chosenDur] === undefined) {
+      return response(400, {
+        error: "Kredit dan durasi tidak sesuai",
+        error_code: "INVALID_DURATION_PRICING"
+      });
+    }
+    finalAmount = Number(parsedAttr[chosenDur]);
+  } else if (pricing.item.attr) {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
     } catch (e) { }
     if (parsedAttr) {
-      const qNum = videoQuality.replace("p", "");
-      const attrKey = `${qNum}`;
-      if (parsedAttr[attrKey] !== undefined) {
-        finalAmount = Number(parsedAttr[attrKey]);
+      if (!isPreview && isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+        finalAmount = Number(parsedAttr["freetrial"]);
+        isFreeTrialUsed = true;
+      } else {
+        const qNum = videoQuality.replace("p", "");
+        const attrKey = `${qNum}`;
+        if (parsedAttr[attrKey] !== undefined) {
+          finalAmount = Number(parsedAttr[attrKey]);
+        }
       }
     }
   }
@@ -253,7 +320,6 @@ exports.handlePostResource = async (event) => {
   const requestId = randomUUID();
   const now = getJakartaISOString();
 
-  const profileItem = await getCustomerProfile(userId);
   const profileCreditBalance = Number(profileItem.credit_balance || 0);
   if (!(profileCreditBalance >= finalAmount)) {
     return response(402, {
@@ -291,6 +357,23 @@ exports.handlePostResource = async (event) => {
     }
   }
 
+  // Parse and upload reference video if present (for MOTION_CONTROL)
+  const videoBase64 = body.video_base_64 || "";
+  let videoRefKey = null;
+  if (videoBase64.trim()) {
+    const parsed = parseImageBase64(videoBase64);
+    if (parsed) {
+      videoRefKey = `user_request/${userId}/${requestId}_video.${extFromContentType(parsed.contentType)}`;
+      try {
+        await uploadToS3(S3_RESOURCE_BUCKET, videoRefKey, parsed.buffer, parsed.contentType);
+        s3Keys.push(videoRefKey);
+      } catch (err) {
+        console.error("S3 video upload error:", err);
+        return response(502, { error: `S3 video upload failed: ${err.message}` });
+      }
+    }
+  }
+
   const putItem = {
     uuid: requestId, user_email: userEmail, user_id: userId, prompt, request_type: requestType,
     resource_family: resourceFamily, status: "SUBMITTING", credit_amount: finalAmount,
@@ -300,6 +383,7 @@ exports.handlePostResource = async (event) => {
     free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
     preview: isPreview ? 1 : 0,
     video_gen_start_at: isPreview ? null : now,
+    ...(videoRefKey ? { video_ref_key: videoRefKey } : {}),
     ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
   };
 
@@ -308,7 +392,8 @@ exports.handlePostResource = async (event) => {
     finalAmount,
     userId,
     requestType,
-    now
+    now,
+    isFreeTrialUsed
   });
   if (errRes) return errRes;
 
@@ -330,6 +415,8 @@ exports.handlePostResource = async (event) => {
     preferred_voice: body.preferred_voice || null,
     lip_sync: requestType === "FREE-TRIAL" ? false : true,
     preview: isPreview,
+    video_ref_key: videoRefKey,
+    duration_seconds: body.duration_seconds || 5
   };
 
   if (GENERATION_MANUAL === "true") {

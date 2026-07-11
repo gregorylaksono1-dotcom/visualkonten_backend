@@ -254,7 +254,7 @@ async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, ref
   const hasImages = Array.isArray(referenceUrls) && referenceUrls.length > 0;
   
   let model;
-  if (requestType === "ANIMASI_1" || requestType === "problemsolutionAnimation") {
+  if (requestType === "ANIMASI_1" || requestType === "problemsolutionAnimation" || String(requestType).toUpperCase().startsWith("ANIMASI")) {
     model = "nano-banana-2-lite";
   } else {
     model = hasImages ? "gpt-image-2-image-to-image" : "gpt-image-2-text-to-image";

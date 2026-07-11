@@ -1021,3 +1021,10 @@ Outputs:
     Value: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
 
 # sam build && sam deploy --config-env production --profile production
+
+# check log di dev
+# sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
+
+# check log di prod
+# sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production
+

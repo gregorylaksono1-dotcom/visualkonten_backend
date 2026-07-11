@@ -495,34 +495,45 @@ async function mergeVideoScenes(payload) {
     const requestType = request_type || "";
     const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || requestType === "TESTIMONY_TULUS" || requestType === "ANIMASI_1";
 
-    if (!isUgcMode && llm_response) {
-      const ttsScript = llm_response.voiceover_script?.script || llm_response.tts_script;
-      if (ttsScript) {
-        try {
-          const { generateTTS } = require("./tts");
-          const { buildTtsGlobalConfig } = require("../lib/resolve-voice");
-          const ttsGlobalConfig = llm_response.tts_global_config || buildTtsGlobalConfig(llm_response, {});
-          const ttsResult = await generateTTS({
-            jobId,
-            userEmail,
-            userId,
-            llmResponse: {
-              ...llm_response,
-              tts_script: ttsScript,
-              tts_global_config: ttsGlobalConfig
-            },
-            S3_RESOURCE_BUCKET,
-            dynamo,
-            USER_REQUEST_TABLE,
-            callGeminiAudio: require("../services").callGeminiAudio,
-            uploadToS3: require("../services").uploadToS3
-          });
-          if (ttsResult && ttsResult.audioS3Key) {
-            finalAudioS3Key = ttsResult.audioS3Key;
-          }
-        } catch (ttsErr) {
-          console.error(`[SFN Orchestrator Merge] TTS generation failed, continuing merge without TTS:`, ttsErr.message);
+    let ttsScript = null;
+    let hasTopLevelVoiceover = false;
+
+    if (llm_response) {
+      if (llm_response.voiceover_script && (llm_response.voiceover_script.tts_script || llm_response.voiceover_script.script)) {
+        hasTopLevelVoiceover = true;
+        ttsScript = llm_response.voiceover_script.tts_script || llm_response.voiceover_script.script;
+      } else if (!isUgcMode) {
+        ttsScript = llm_response.tts_script;
+      }
+    }
+
+    if (ttsScript) {
+      try {
+        console.log(`[SFN Orchestrator Merge] Generating TTS for script: "${ttsScript.slice(0, 100)}..."`);
+        const { generateTTS } = require("./tts");
+        const { buildTtsGlobalConfig } = require("../lib/resolve-voice");
+        const ttsGlobalConfig = llm_response.tts_global_config || buildTtsGlobalConfig(llm_response, {});
+        const ttsResult = await generateTTS({
+          jobId,
+          userEmail,
+          userId,
+          llmResponse: {
+            ...llm_response,
+            tts_script: ttsScript,
+            tts_global_config: ttsGlobalConfig
+          },
+          S3_RESOURCE_BUCKET,
+          dynamo,
+          USER_REQUEST_TABLE,
+          callGeminiAudio: require("../services").callGeminiAudio,
+          uploadToS3: require("../services").uploadToS3
+        });
+        if (ttsResult && ttsResult.audioS3Key) {
+          finalAudioS3Key = ttsResult.audioS3Key;
+          console.log(`[SFN Orchestrator Merge] TTS successfully generated: ${finalAudioS3Key}`);
         }
+      } catch (ttsErr) {
+        console.error(`[SFN Orchestrator Merge] TTS generation failed, continuing merge without TTS:`, ttsErr.message);
       }
     }
 

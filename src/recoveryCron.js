@@ -86,7 +86,8 @@ exports.handler = async (event) => {
             const taskId = sceneItem[sceneKey];
             
             console.log(`[Recovery Cron] Checking Scene ${sceneId} (Task ID: ${taskId}) for job ${job.uuid}`);
-            const resJson = await getKieTaskStatus(taskId, kieApiKey);
+            const isVeo = job.request_type && String(job.request_type).toUpperCase() !== "CHASER_1";
+            const resJson = await getKieTaskStatus(taskId, kieApiKey, isVeo);
             if (resJson.code === 200 && resJson.data) {
               const status = String(resJson.data.state || resJson.data.status || "").toLowerCase();
               if (status === "success" || status === "text_success") {
@@ -143,7 +144,8 @@ exports.handler = async (event) => {
         if (!taskId) continue;
 
         console.log(`[Recovery Cron] Checking single task ${taskId} for job ${job.uuid}...`);
-        const resJson = await getKieTaskStatus(taskId, kieApiKey);
+        const isVeo = Boolean(job.comfy_prompt_id) && String(job.request_type || "").toUpperCase() !== "CHASER_1";
+        const resJson = await getKieTaskStatus(taskId, kieApiKey, isVeo);
 
         if (resJson.code === 200 && resJson.data) {
           const status = String(resJson.data.state || resJson.data.status || "").toLowerCase();

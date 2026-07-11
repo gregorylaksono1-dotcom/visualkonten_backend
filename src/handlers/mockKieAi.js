@@ -2,7 +2,7 @@
 
 const { response } = require("../utils");
 
-const KIE_MOCK_IMAGE_URL = process.env.KIE_MOCK_IMAGE_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/library/default_talent.png";
+const KIE_MOCK_IMAGE_URL = process.env.KIE_MOCK_IMAGE_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/dumy_scene.jpeg";
 const KIE_MOCK_VIDEO_URL = process.env.KIE_MOCK_VIDEO_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/_product_jeans.mp4";
 
 exports.handleMockKieAi = async (event) => {
@@ -39,7 +39,7 @@ exports.handleMockKieAi = async (event) => {
     if (callBackUrl) {
       // Simulate real processing time by sleeping 500ms
       await new Promise(r => setTimeout(r, 500));
-      
+
       console.log(`[Mock Kie.ai] Sending callback to: ${callBackUrl}`);
       try {
         const res = await fetch(callBackUrl, {
@@ -78,7 +78,7 @@ exports.handleMockKieAi = async (event) => {
     if (callBackUrl) {
       // Simulate video processing time by sleeping 1000ms
       await new Promise(r => setTimeout(r, 1000));
-      
+
       console.log(`[Mock Kie.ai] Sending callback to: ${callBackUrl}`);
       try {
         const res = await fetch(callBackUrl, {

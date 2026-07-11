@@ -1,5 +1,22 @@
 "use strict";
 
+const ssmPath = process.env.CONFIG_SSM_PATH || "";
+const isDev = ssmPath.includes("/dev") || ssmPath === "" || ssmPath === "/visualkonten/dev";
+
+const KIEAI_MOCK_BASE = "https://xayhmg0s7b.execute-api.ap-southeast-1.amazonaws.com/dev/mock-kieai";
+
+const FILE_UPLOAD_URL = isDev
+  ? `${KIEAI_MOCK_BASE}/file-url-upload`
+  : "https://kieai.redpandaai.co/api/file-url-upload";
+
+const CREATE_TASK_URL = isDev
+  ? `${KIEAI_MOCK_BASE}/createTask`
+  : "https://api.kie.ai/api/v1/jobs/createTask";
+
+const RECORD_INFO_BASE = isDev
+  ? `${KIEAI_MOCK_BASE}/jobs/recordInfo`
+  : "https://api.kie.ai/api/v1/jobs/recordInfo";
+
 /**
  * Helper to upload a publicly accessible S3 URL to Kie.ai's temporary storage.
  * Kie.ai's models require input files to be uploaded first to get a Kie.ai temporary URL.
@@ -7,7 +24,7 @@
 async function uploadToKie(s3Url, kieApiKey) {
   console.log(`[Kie.ai] Uploading asset to Kie.ai temporary storage: ${s3Url.split("?")[0]}`);
   try {
-    const resp = await fetch("https://kieai.redpandaai.co/api/file-url-upload", {
+    const resp = await fetch(FILE_UPLOAD_URL, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${kieApiKey}`,
@@ -53,7 +70,7 @@ async function createKieTask(model, input, callBackUrl, kieApiKey) {
 
     console.log(`[Kie.ai Request] Payload: ${JSON.stringify(payload, null, 2)}`);
 
-    const resp = await fetch("https://api.kie.ai/api/v1/jobs/createTask", {
+    const resp = await fetch(CREATE_TASK_URL, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${kieApiKey}`,
@@ -84,11 +101,93 @@ async function createKieTask(model, input, callBackUrl, kieApiKey) {
 }
 
 /**
+ * Submits a video generation task to Kie.ai (Veo or Seedance).
+ */
+async function createVeoTask(model, input, callBackUrl, kieApiKey) {
+  console.log(`[Kie.ai] Creating video task for model: ${model}`);
+  try {
+    const isSeedance = model.includes("seedance") || model.includes("bytedance");
+
+    let url;
+    let payload;
+
+    if (isSeedance) {
+      // Seedance uses ComfyUI createTask endpoint (with inputs wrapped in 'input')
+      url = isDev
+        ? `${KIEAI_MOCK_BASE}/veo/generate`
+        : "https://api.kie.ai/api/v1/jobs/createTask";
+      
+      payload = {
+        model,
+        input
+      };
+      if (callBackUrl) {
+        payload.callBackUrl = callBackUrl;
+      }
+    } else {
+      // Veo models use native /veo/generate endpoint (inputs are flattened at top level)
+      url = isDev
+        ? `${KIEAI_MOCK_BASE}/veo/generate`
+        : "https://api.kie.ai/api/v1/veo/generate";
+
+      payload = {
+        model,
+        prompt: input.prompt,
+        imageUrls: input.imageUrls,
+        aspect_ratio: input.aspect_ratio,
+        duration: input.duration
+      };
+      if (callBackUrl) {
+        payload.callBackUrl = callBackUrl;
+      }
+    }
+
+    console.log(`[Kie.ai Request] Endpoint: ${url}, Payload: ${JSON.stringify(payload, null, 2)}`);
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${kieApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const respText = await resp.text();
+    console.log(`[Kie.ai Response] Status: ${resp.status}, Body: ${respText}`);
+
+    if (!resp.ok) {
+      throw new Error(`Kie.ai task creation failed with status ${resp.status}: ${respText}`);
+    }
+
+    const resJson = JSON.parse(respText);
+    const taskId = resJson.taskId || resJson.data?.taskId;
+    if (resJson.code !== 200 || !taskId) {
+      throw new Error(`Kie.ai task creation returned error code/no taskId: ${JSON.stringify(resJson)}`);
+    }
+
+    console.log(`[Kie.ai] Task created successfully. Task ID: ${taskId}`);
+    return taskId;
+  } catch (err) {
+    console.error(`[Kie.ai] Error in createVeoTask:`, err.message);
+    throw err;
+  }
+}
+
+/**
  * Query task details/status from Kie.ai.
  */
-async function getKieTaskStatus(taskId, kieApiKey) {
+async function getKieTaskStatus(taskId, kieApiKey, isVeo = false) {
   try {
-    const resp = await fetch(`https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${taskId}`, {
+    const useVeoEndpoint = isVeo || String(taskId).includes("vid") || String(taskId).includes("mock-vid");
+    const url = isDev
+      ? `${KIEAI_MOCK_BASE}/jobs/recordInfo?taskId=${taskId}`
+      : (useVeoEndpoint
+          ? `https://api.kie.ai/api/v1/veo/record-info?taskId=${taskId}`
+          : `${RECORD_INFO_BASE}?taskId=${taskId}`);
+
+    console.log(`[Kie.ai] Checking task status. Url: ${url}`);
+    const resp = await fetch(url, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${kieApiKey}`
@@ -172,6 +271,7 @@ function findMediaUrlInKieData(data) {
 module.exports = {
   uploadToKie,
   createKieTask,
+  createVeoTask,
   getKieTaskStatus,
   findMediaUrlInKieData
 };

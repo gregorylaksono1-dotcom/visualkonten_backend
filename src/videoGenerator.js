@@ -114,7 +114,8 @@ const checkSingleJobStatus = async (job) => {
         const taskId = sceneItem[sceneKey];
         
         console.log(`[Poller] Checking Scene ${sceneId} (Task ID: ${taskId}) for job ${job.uuid}`);
-        const resJson = await getKieTaskStatus(taskId, kieApiKey);
+        const isVeo = job.request_type && String(job.request_type).toUpperCase() !== "CHASER_1";
+        const resJson = await getKieTaskStatus(taskId, kieApiKey, isVeo);
         if (resJson.code === 200 && resJson.data) {
           const status = String(resJson.data.state || resJson.data.status || "").toLowerCase();
           if (status === "success" || status === "text_success") {
@@ -171,7 +172,8 @@ const checkSingleJobStatus = async (job) => {
     if (!taskId) return;
     
     console.log(`[Poller] Checking single task ${taskId} for job ${job.uuid}...`);
-    const resJson = await getKieTaskStatus(taskId, kieApiKey);
+    const isVeo = Boolean(job.comfy_prompt_id) && String(job.request_type || "").toUpperCase() !== "CHASER_1";
+    const resJson = await getKieTaskStatus(taskId, kieApiKey, isVeo);
     if (resJson.code === 200 && resJson.data) {
       const status = String(resJson.data.state || resJson.data.status || "").toLowerCase();
       if (status === "success" || status === "text_success") {
@@ -263,11 +265,20 @@ const handleSubmission = async (event) => {
     }
   }
 
-  if (requestType === "TESTIMONY_TULUS") {
-    console.log(`[Worker] Generating Testimony LLM response for job ${jobId}`);
+  // Check for dynamic prompt template in database (pricing table)
+  const standardTypes = ["UGC-P", "UGC-S", "FREE-TRIAL", "PRODUCT-CINEMATIC", "PRODUCT-CINEMATIK"];
+  let templatePrompt = null;
+  if (!standardTypes.includes(String(requestType).toUpperCase())) {
+    const { loadPromptBuilder } = require("./prompt/genericTemplateHandler");
+    templatePrompt = await loadPromptBuilder(requestType);
+  }
+  const isTemplateDriven = Boolean(templatePrompt);
+
+  if (isTemplateDriven) {
+    console.log(`[Worker] Generating dynamic LLM response for job ${jobId} (Type: ${requestType})`);
     try {
-      const { handleTestimonyTulus } = require("./prompt/testimonyPresenter");
-      const llmResponse = await handleTestimonyTulus({
+      const { handleGenericTemplate } = require("./prompt/genericTemplateHandler");
+      const llmResponse = await handleGenericTemplate({
         jobId,
         userEmail,
         userId: event.userId,
@@ -280,74 +291,20 @@ const handleSubmission = async (event) => {
         s3: s3Client,
         USER_REQUEST_TABLE,
         preview: preview || false,
-        existingJob
+        existingJob,
+        requestType,
+        template: templatePrompt
       });
       existingJob.llm_response = llmResponse;
-      console.log(`[Worker] Testimony LLM response generated successfully. Proceeding to state machine.`);
+      console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}. Proceeding to state machine.`);
     } catch (err) {
-      console.error(`[Worker] Error executing testimony presenter for job ${jobId}:`, err);
+      console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
       await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
       return;
     }
   }
 
-  if (requestType === "ANIMASI_1") {
-    console.log(`[Worker] Generating Animasi 1 LLM response for job ${jobId}`);
-    try {
-      const { handleAnimasi1 } = require("./prompt/problemSolutionAnimation");
-      const llmResponse = await handleAnimasi1({
-        jobId,
-        userEmail,
-        userId: event.userId,
-        currentS3ImageUrls,
-        prompt,
-        videoQuality,
-        aspectRatio,
-        S3_RESOURCE_BUCKET,
-        dynamo,
-        s3: s3Client,
-        USER_REQUEST_TABLE,
-        preview: preview || false,
-        existingJob
-      });
-      existingJob.llm_response = llmResponse;
-      console.log(`[Worker] Animasi 1 LLM response generated successfully. Proceeding to state machine.`);
-    } catch (err) {
-      console.error(`[Worker] Error executing Animasi 1 handler for job ${jobId}:`, err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
-      return;
-    }
-  }
-
-  if (requestType === "UGC_PROBLEM_SOLUTION") {
-    console.log(`[Worker] Generating UGC Problem Solution LLM response for job ${jobId}`);
-    try {
-      const { handleUgcProblemSolution } = require("./prompt/ugcProblemSolution");
-      const llmResponse = await handleUgcProblemSolution({
-        jobId,
-        userEmail,
-        userId: event.userId,
-        currentS3ImageUrls,
-        prompt,
-        videoQuality,
-        aspectRatio,
-        S3_RESOURCE_BUCKET,
-        dynamo,
-        s3: s3Client,
-        USER_REQUEST_TABLE,
-        preview: preview || false,
-        existingJob
-      });
-      existingJob.llm_response = llmResponse;
-      console.log(`[Worker] UGC Problem Solution LLM response generated successfully. Proceeding to state machine.`);
-    } catch (err) {
-      console.error(`[Worker] Error executing UGC Problem Solution handler for job ${jobId}:`, err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
-      return;
-    }
-  }
-
-  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || requestType === "TESTIMONY_TULUS" || requestType === "ANIMASI_1" || requestType === "UGC_PROBLEM_SOLUTION";
+  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || isTemplateDriven;
   const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
 
   if (isUgcMode || isProductCinematic) {

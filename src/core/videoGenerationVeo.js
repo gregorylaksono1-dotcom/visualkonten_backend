@@ -73,7 +73,7 @@ async function generateVeoVideo(params) {
     let resolvedDuration = Number(duration || 4);
     if (resolvedDuration <= 5) resolvedDuration = 4;
 
-    motionPrompt = `${motionPrompt.trim()}, avoid ${resolvedNegativePrompt}`;
+    motionPrompt = `${motionPrompt.trim()}. DO NOT ALLOW: ${resolvedNegativePrompt}`;
 
     const input = {
       prompt: motionPrompt,

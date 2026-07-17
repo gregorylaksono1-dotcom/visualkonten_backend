@@ -1,20 +1,18 @@
 "use strict";
 
-const { generateVeoVideo } = require("./videoGenerationVeo");
-const { generateSeedanceVideo } = require("./videoGenerationSeedance");
+const { generateGrokVideo } = require("./videoGenerationGrok");
 
 /**
- * Facade router to trigger video generation task on Kie.ai based on the model family
+ * Facade router to trigger video generation task on Kie.ai.
+ *
+ * Active model: Grok Imagine Video 1.5 (grok-imagine-video-1-5-preview)
+ *
+ * Other available implementations (kept for future use):
+ *   - ./videoGenerationVeo      → Google Veo 3.1 (veo3_lite)
+ *   - ./videoGenerationSeedance → ByteDance Seedance 1.5 Pro (used for CHASER_1)
  */
 async function generateComfyUIVideo(params) {
-  const requestType = params.request_type || "";
-  const isSeedance = requestType === "CHASER_1" || String(requestType).toUpperCase() === "CHASER_1";
-
-  if (isSeedance) {
-    return await generateSeedanceVideo(params);
-  } else {
-    return await generateVeoVideo(params);
-  }
+  return await generateGrokVideo(params);
 }
 
 module.exports = {

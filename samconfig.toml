@@ -26,7 +26,7 @@ VeoVideoDurationSeconds="8" \
 ComfyMaxConcurrentJobs="1" \
 FreeTrialBackend="comfyui" \
 Runpod="false" \
-generationManual="true" \
+generationManual="false" \
 """
 
 [sandbox.deploy.parameters]
@@ -56,7 +56,7 @@ GcsBucket="result-visualkonten" \
 VeoVideoDurationSeconds="8" \
 FreeTrialBackend="comfyui" \
 Runpod="false" \
-generationManual="true" \
+generationManual="false" \
 """
 
 [production.deploy.parameters]
@@ -89,5 +89,5 @@ GcsBucket="result-visualkonten-prod" \
 VeoVideoDurationSeconds="8" \
 FreeTrialBackend="comfyui" \
 Runpod="false" \
-generationManual="true" \
+generationManual="false" \
 """

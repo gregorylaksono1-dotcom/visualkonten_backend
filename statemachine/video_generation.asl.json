@@ -1,0 +1,275 @@
+{
+  "Comment": "Bikinbik.in Video Generation Workflow using Step Functions",
+  "StartAt": "PrepareJobData",
+  "States": {
+    "PrepareJobData": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ComfyUIWorkerFunctionArn}",
+        "Payload": {
+          "step": "prepareJobData",
+          "data.$": "$"
+        }
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "UpdateStatusFailed"
+        }
+      ],
+      "Next": "GenerateLockImages"
+    },
+
+    "GenerateLockImages": {
+      "Type": "Map",
+      "ItemsPath": "$.locks",
+      "Parameters": {
+        "jobId.$": "$.jobId",
+        "lock.$": "$$.Map.Item.Value",
+        "userEmail.$": "$.userEmail",
+        "userId.$": "$.userId"
+      },
+      "Iterator": {
+        "StartAt": "SubmitLockImage",
+        "States": {
+          "SubmitLockImage": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+              "FunctionName": "${ComfyUIWorkerFunctionArn}",
+              "Payload": {
+                "step": "submitLockImage",
+                "jobId.$": "$.jobId",
+                "lock.$": "$.lock",
+                "userEmail.$": "$.userEmail",
+                "userId.$": "$.userId",
+                "taskToken.$": "$$.Task.Token"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "UpdateStatusFailed"
+        }
+      ],
+      "ResultPath": "$.lockResults",
+      "Next": "GenerateSceneImages"
+    },
+
+    "GenerateSceneImages": {
+      "Type": "Map",
+      "ItemsPath": "$.scenes",
+      "Parameters": {
+        "jobId.$": "$.jobId",
+        "scene.$": "$$.Map.Item.Value",
+        "userEmail.$": "$.userEmail",
+        "userId.$": "$.userId",
+        "lockResults.$": "$.lockResults"
+      },
+      "Iterator": {
+        "StartAt": "SubmitSceneImage",
+        "States": {
+          "SubmitSceneImage": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+              "FunctionName": "${ComfyUIWorkerFunctionArn}",
+              "Payload": {
+                "step": "submitSceneImage",
+                "jobId.$": "$.jobId",
+                "scene.$": "$.scene",
+                "userEmail.$": "$.userEmail",
+                "userId.$": "$.userId",
+                "lockResults.$": "$.lockResults",
+                "taskToken.$": "$$.Task.Token"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "UpdateStatusFailed"
+        }
+      ],
+      "ResultPath": "$.sceneImageResults",
+      "Next": "GenerateSceneVideos"
+    },
+
+    "GenerateSceneVideos": {
+      "Type": "Map",
+      "ItemsPath": "$.scenes",
+      "Parameters": {
+        "jobId.$": "$.jobId",
+        "scene.$": "$$.Map.Item.Value",
+        "userEmail.$": "$.userEmail",
+        "userId.$": "$.userId",
+        "sceneImageResults.$": "$.sceneImageResults",
+        "audio.$": "$.audio",
+        "audio_duration.$": "$.audio_duration",
+        "aspect_ratio.$": "$.aspect_ratio",
+        "request_type.$": "$.request_type",
+        "llm_response.$": "$.llm_response"
+      },
+      "Iterator": {
+        "StartAt": "SubmitSceneVideo",
+        "States": {
+          "SubmitSceneVideo": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+              "FunctionName": "${ComfyUIWorkerFunctionArn}",
+              "Payload": {
+                "step": "submitSceneVideo",
+                "jobId.$": "$.jobId",
+                "scene.$": "$.scene",
+                "userEmail.$": "$.userEmail",
+                "userId.$": "$.userId",
+                "audio.$": "$.audio",
+                "audio_duration.$": "$.audio_duration",
+                "aspect_ratio.$": "$.aspect_ratio",
+                "request_type.$": "$.request_type",
+                "llm_response.$": "$.llm_response",
+                "sceneImageResults.$": "$.sceneImageResults",
+                "taskToken.$": "$$.Task.Token"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "UpdateStatusFailed"
+        }
+      ],
+      "ResultPath": "$.videoSceneResults",
+      "Next": "MergeVideoScenes"
+    },
+
+    "MergeVideoScenes": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ComfyUIWorkerFunctionArn}",
+        "Payload": {
+          "step": "mergeVideoScenes",
+          "jobId.$": "$.jobId",
+          "userEmail.$": "$.userEmail",
+          "userId.$": "$.userId",
+          "videoSceneResults.$": "$.videoSceneResults",
+          "audio.$": "$.audio",
+          "llm_response.$": "$.llm_response",
+          "request_type.$": "$.request_type"
+        }
+      },
+      "ResultPath": "$.mergeResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "UpdateStatusFailed"
+        }
+      ],
+      "Next": "UpdateStatusCompleted"
+    },
+
+    "UpdateStatusCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${UserRequestTableName}",
+        "Key": {
+          "uuid": { "S.$": "$.jobId" },
+          "user_email": { "S.$": "$.userEmail" }
+        },
+        "UpdateExpression": "SET #s = :status, result_url = :res, updated_at = :now",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": { "S": "COMPLETED" },
+          ":res": { "S.$": "$.mergeResult.Payload.result_url" },
+          ":now": { "S.$": "$.mergeResult.Payload.completedAt" }
+        }
+      },
+      "End": true
+    },
+
+    "UpdateStatusFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${UserRequestTableName}",
+        "Key": {
+          "uuid": { "S.$": "$.jobId" },
+          "user_email": { "S.$": "$.userEmail" }
+        },
+        "UpdateExpression": "SET #s = :status, error_message = :err, updated_at = :now",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": { "S": "FAILED" },
+          ":err": { "S": "Video generation workflow failed after all retry attempts." },
+          ":now": { "S.$": "$$.Execution.StartTime" }
+        }
+      },
+      "Next": "SetExecutionFailed"
+    },
+
+    "SetExecutionFailed": {
+      "Type": "Fail",
+      "Error": "WorkflowFailed",
+      "Cause": "Video generation workflow failed after all retry attempts."
+    }
+  }
+}

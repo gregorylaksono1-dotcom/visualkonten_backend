@@ -92,3 +92,67 @@ exports.handleGetUsage = async (event) => {
     next_token: lastEvaluatedKey,
   });
 };
+
+exports.handleRateUsage = async (event) => {
+  const claims = getClaims(event);
+  const userEmail = claims.email || claims.username;
+  if (!userEmail) return response(401, { error: "Unauthorized: missing email." });
+
+  const { pathParameters } = event;
+  const uuid = pathParameters?.uuid;
+  if (!uuid) return response(400, { error: "UUID is required" });
+
+  const { parseBody, normalizeUserEmail } = require("../utils");
+  const body = parseBody(event);
+  const rating = body.rating ? Number(body.rating) : null;
+  const review_text = body.review_text;
+  
+  if (!rating && review_text === undefined) {
+    return response(400, { error: "Rating or review is required" });
+  }
+
+  const { docClient } = require("../services");
+  const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+
+  let updateExp = "SET updated_at = :u";
+  let expValues = { ":u": new Date().toISOString() };
+
+  if (rating !== null) {
+    if (rating < 1 || rating > 5) return response(400, { error: "Rating must be 1-5" });
+    updateExp += ", rating = :r";
+    expValues[":r"] = rating;
+  }
+
+  if (review_text !== undefined) {
+    updateExp += ", review_text = :rt";
+    expValues[":rt"] = review_text;
+
+    if (review_text.trim() !== "") {
+      const { sendTelegramMessage } = require("../lib/telegram");
+      await sendTelegramMessage(`User ${normalizeUserEmail(userEmail)} ${uuid} ${review_text}`);
+    }
+  }
+
+  try {
+    await docClient.send(
+      new UpdateCommand({
+        TableName: USER_REQUEST_TABLE_NAME,
+        Key: { 
+          uuid: uuid,
+          user_email: normalizeUserEmail(userEmail)
+        },
+        UpdateExpression: updateExp,
+        ConditionExpression: "attribute_exists(#uuid)",
+        ExpressionAttributeNames: {
+          "#uuid": "uuid"
+        },
+        ExpressionAttributeValues: expValues
+      })
+    );
+    return response(200, { message: "Feedback saved successfully" });
+  } catch (err) {
+    console.error("Rate usage error", err);
+    return response(500, { error: err.message });
+  }
+};
+

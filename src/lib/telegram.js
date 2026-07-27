@@ -10,15 +10,19 @@ const TELEGRAM_CHAT_ID = "7989331780";
  * @param {string} text 
  */
 function sendTelegramMessage(text) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
-  https.get(url, (res) => {
-    let data = "";
-    res.on("data", (chunk) => { data += chunk; });
-    res.on("end", () => {
-      console.log("[Telegram] Notification sent. Response:", data);
+  return new Promise((resolve, reject) => {
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
+    https.get(url, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        console.log("[Telegram] Notification sent. Response:", data);
+        resolve(data);
+      });
+    }).on("error", (err) => {
+      console.error("[Telegram] Notification failed:", err.message);
+      resolve(null); // resolve rather than reject to avoid crashing lambda
     });
-  }).on("error", (err) => {
-    console.error("[Telegram] Notification failed:", err.message);
   });
 }
 
@@ -44,7 +48,7 @@ function sendJobStatusNotification(jobId, status, details = {}) {
     text += `\n⚠️ Error: ${details.error_message}`;
   }
 
-  sendTelegramMessage(text);
+  return sendTelegramMessage(text);
 }
 
 module.exports = {

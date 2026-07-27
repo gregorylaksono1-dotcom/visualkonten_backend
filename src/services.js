@@ -154,7 +154,6 @@ const resolvePricingRow = async (decodedKey) => {
     const item = q.Items?.[0];
     if (!item) return null;
     const n = parseCreditsFromPricingItem(item);
-    console.log("dapet item 2:", item);
     if (!Number.isFinite(n) || n <= 0) return null;
     return { amount: n, item };
   } catch (err) {
@@ -546,11 +545,8 @@ const createTopupOrder = async ({ orderId, userEmail, userId, amount, total, now
 const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now, isFreeTrialUsed }) => {
   try {
     const expressionAttributeValues = { ":z": 0, ":c": finalAmount, ":now": now };
-    if (requestType === "FREE-TRIAL") {
+    if (requestType === "FREE-TRIAL" || isFreeTrialUsed) {
       expressionAttributeValues[":one"] = 1;
-    }
-    if (isFreeTrialUsed) {
-      expressionAttributeValues[":zero"] = 0;
     }
 
     await docClient.send(new TransactWriteCommand({
@@ -564,12 +560,14 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
               requestType === "FREE-TRIAL"
                 ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
                 : (isFreeTrialUsed
-                    ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = :zero, updated_at = :now"
-                    : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now"),
+                  ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
+                  : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now"),
             ConditionExpression:
               requestType === "FREE-TRIAL"
                 ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
-                : "attribute_exists(user_id) AND credit_balance >= :c",
+                : (isFreeTrialUsed
+                  ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
+                  : "attribute_exists(user_id) AND credit_balance >= :c"),
             ExpressionAttributeValues: expressionAttributeValues,
           }
         },

@@ -127,7 +127,7 @@ async function prepareJobData(payload) {
   const locks = [];
   const currentUrls = Array.isArray(currentS3ImageUrls) ? currentS3ImageUrls : [];
 
-  if (llmResponse.locks && typeof llmResponse.locks === "object") {
+  if (llmResponse.locks && typeof llmResponse.locks === "object" && Object.keys(llmResponse.locks).length > 0) {
     for (const [id, lockData] of Object.entries(llmResponse.locks)) {
       if (lockData.type === "provided_reference") {
         const imageRef = lockData.image || "P1";
@@ -141,7 +141,7 @@ async function prepareJobData(payload) {
           isImageFinished: true,
           taskId: ""
         });
-      } else if (lockData.type === "generated_reference") {
+      } else if (lockData.type === "generated_reference" || lockData.type === "generate_from_description") {
         locks.push({
           id,
           prompt: lockData.image_prompt || "",
@@ -153,13 +153,66 @@ async function prepareJobData(payload) {
       }
     }
   } else {
-    // Fallback to legacy structure
-    const ig = llmResponse.image_generation || {};
-    if (ig.talent_frame?.prompt) locks.push({ id: "talent", prompt: ig.talent_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
-    if (ig.product_frame?.prompt) locks.push({ id: "product", prompt: ig.product_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
-    if (ig.hero_frame?.prompt) locks.push({ id: "hero", prompt: ig.hero_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
-    if (ig.transition_frame?.prompt) locks.push({ id: "transition", prompt: ig.transition_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
-    if (ig.reveal_start_frame?.prompt) locks.push({ id: "reveal", prompt: ig.reveal_start_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    // Check root-level locks first (new structure where "product", "talent", etc. are at the root)
+    const rootLocks = ["product", "talent", "hero", "transition", "reveal"];
+    let rootLocksFound = false;
+    for (const id of rootLocks) {
+      if (llmResponse[id] && typeof llmResponse[id] === "object") {
+        rootLocksFound = true;
+        if (llmResponse[id].image) {
+          const imageRef = llmResponse[id].image;
+          const idx = parseInt(imageRef.replace("P", ""), 10) - 1;
+          const s3key = currentUrls[idx] || currentUrls[0] || "";
+          locks.push({
+            id,
+            prompt: "",
+            negative_prompt: "",
+            s3key,
+            isImageFinished: true,
+            taskId: ""
+          });
+        } else if (llmResponse[id].image_prompt || llmResponse[id].prompt) {
+          locks.push({
+            id,
+            prompt: llmResponse[id].image_prompt || llmResponse[id].prompt,
+            negative_prompt: llmResponse[id].negative_image_prompt || llmResponse[id].negative_prompt || "",
+            s3key: "",
+            isImageFinished: false,
+            taskId: ""
+          });
+        }
+      }
+    }
+    
+    // Fallback to legacy structure if no root locks found
+    if (!rootLocksFound) {
+      const ig = llmResponse.image_generation || {};
+      if (ig.talent_frame?.prompt) locks.push({ id: "talent", prompt: ig.talent_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+      if (ig.product_frame?.prompt) locks.push({ id: "product", prompt: ig.product_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+      if (ig.hero_frame?.prompt) locks.push({ id: "hero", prompt: ig.hero_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+      if (ig.transition_frame?.prompt) locks.push({ id: "transition", prompt: ig.transition_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+      if (ig.reveal_start_frame?.prompt) locks.push({ id: "reveal", prompt: ig.reveal_start_frame.prompt, negative_prompt: "", s3key: "", isImageFinished: false, taskId: "" });
+    }
+  }
+
+  // Always force product lock to use uploaded image if available
+  if (currentUrls.length > 0) {
+    const existingProduct = locks.find(l => l.id === "product");
+    if (existingProduct) {
+      existingProduct.s3key = currentUrls[0];
+      existingProduct.isImageFinished = true;
+      existingProduct.prompt = "";
+      existingProduct.negative_prompt = "";
+    } else {
+      locks.push({
+        id: "product",
+        prompt: "",
+        negative_prompt: "",
+        s3key: currentUrls[0],
+        isImageFinished: true,
+        taskId: ""
+      });
+    }
   }
 
   // 2. Build scenes
@@ -170,11 +223,12 @@ async function prepareJobData(payload) {
     const dependency = Array.isArray(s.dependency) ? s.dependency : locks.map(l => l.id);
     return {
       scene_id: sceneId,
-      prompt_image: s.image_prompt || s.prompt || finalJobPrompt,
+      prompt_image: s.image_prompt === null ? null : (s.image_prompt || s.prompt || finalJobPrompt),
       negative_prompt_image: s.negative_image_prompt || s.negative_prompt || "",
       duration_seconds: Number(s.duration || s.duration_seconds || 5),
       dependency: dependency,
       video_prompt: s.video_prompt || s.ltx_prompt || s.motion_prompt || "Cinematic panning shot.",
+      continuity: s.continuity || null,
       isImageFinished: false,
       isVideoSceneFinished: false,
       imageTaskId: "",
@@ -267,6 +321,16 @@ async function submitSceneImage(payload) {
   console.log(`[SFN Orchestrator] submitSceneImage for jobId ${jobId}, scene id ${scene.scene_id}`);
   await saveTaskToken(jobId, userEmail, `image_${scene.scene_id}`, taskToken);
 
+  if (scene.continuity === "chain_from_previous" && scene.prompt_image === null) {
+    console.log(`[SFN Orchestrator] Scene ${scene.scene_id} has continuity: chain_from_previous and prompt_image is null. Skipping image generation.`);
+    const { SendTaskSuccessCommand } = require("@aws-sdk/client-sfn");
+    await sfnClient.send(new SendTaskSuccessCommand({
+      taskToken,
+      output: JSON.stringify({ id: scene.scene_id, s3key: null, chain_from_previous: true })
+    }));
+    return;
+  }
+
   // Resolve dependencies signed S3 URLs
   const referenceUrls = [];
   const dependencies = Array.isArray(scene.dependency) ? scene.dependency : [];
@@ -334,6 +398,26 @@ async function submitSceneVideo(payload) {
     throw new Error(`Starting frame image result not found for scene ${scene.scene_id}`);
   }
   const parsedImgRes = typeof sceneImgResult === "string" ? JSON.parse(sceneImgResult) : sceneImgResult;
+
+  if (parsedImgRes.chain_from_previous && !parsedImgRes.s3key) {
+    console.log(`[SFN Orchestrator] Scene ${scene.scene_id} is chain_from_previous. Looking for previous scene image...`);
+    const sortedResults = Array.isArray(sceneImageResults) 
+      ? sceneImageResults.map(r => typeof r === "string" ? JSON.parse(r) : r).sort((a, b) => Number(a.id) - Number(b.id)) 
+      : [];
+    
+    // Find the last one before current scene that has s3key
+    const prevScenes = sortedResults.filter(r => Number(r.id) < Number(scene.scene_id) && r.s3key);
+    if (prevScenes.length > 0) {
+      parsedImgRes.s3key = prevScenes[prevScenes.length - 1].s3key;
+      console.log(`[SFN Orchestrator] Using s3key ${parsedImgRes.s3key} from scene ${prevScenes[prevScenes.length - 1].id} for scene ${scene.scene_id}`);
+    } else {
+      throw new Error(`Scene ${scene.scene_id} depends on previous scene image, but no previous scene image found.`);
+    }
+  }
+
+  if (!parsedImgRes || !parsedImgRes.s3key) {
+    throw new Error(`Starting frame image result not found for scene ${scene.scene_id}`);
+  }
 
   // Resolve signed S3 URL of the starting frame image
   const key = extractS3Key(parsedImgRes.s3key);
@@ -559,7 +643,7 @@ async function mergeVideoScenes(payload) {
 
     let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest ${outputPath}`;
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac ${outputPath}`;
     }
 
     console.log(`[SFN Orchestrator Merge] Running FFmpeg: ${cmd}`);

@@ -24,6 +24,11 @@ exports.handler = async (event) => {
       return event;
     }
 
+    if (triggerSource && triggerSource.startsWith("PostAuthentication_")) {
+      const { sendTelegramMessage } = require("./lib/telegram");
+      await sendTelegramMessage(`user "${email || ""}" login`);
+    }
+
     await docClient.send(
       new PutCommand({
         TableName: PROFILE_TABLE_NAME,

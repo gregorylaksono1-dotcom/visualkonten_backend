@@ -20,7 +20,7 @@ const response = (statusCode, body) => ({
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Credentials": true,
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
-    "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE",
   },
   body: JSON.stringify(body),
 });
@@ -55,6 +55,8 @@ const mapUserRequestUsageRow = (item) => ({
   error_message: item.error_message ?? null,
   preview_duration: item.preview_duration ?? null,
   video_generation_duration: item.video_generation_duration ?? null,
+  rating: item.rating ?? null,
+  review_text: item.review_text ?? null,
 });
 
 const parseImageBase64 = (raw) => {

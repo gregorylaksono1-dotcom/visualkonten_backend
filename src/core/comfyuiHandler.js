@@ -428,26 +428,15 @@ async function processComfyUICompletion(params) {
         s3Key = `generated_image/${userId}/${subfolder}/${jobId}_${id}.png`;
         outputObj = { s3key: s3Key, id, type };
 
-        // Save scene image key to generated_scenes in DynamoDB for storyboard display
         if (type === "imagesScene" && jobData) {
-          console.log(`[ComfyUI Webhook SFN Callback] Saving scene ${id} to DynamoDB generated_scenes`);
-          let dbScenes = Array.isArray(jobData.generated_scenes) ? [...jobData.generated_scenes] : [];
-          const existingIdx = dbScenes.findIndex(s => String(s.scene_id) === String(id));
-          if (existingIdx !== -1) {
-            dbScenes[existingIdx].s3_key = s3Key;
-            delete dbScenes[existingIdx].url; // Clear temporary url if any
-          } else {
-            dbScenes.push({
-              scene_id: Number(id),
-              s3_key: s3Key
-            });
-          }
+          console.log(`[ComfyUI Webhook SFN Callback] Saving scene ${id} to DynamoDB generated_scenes via list_append`);
           await dynamo.send(new UpdateCommand({
             TableName: USER_REQUEST_TABLE,
             Key: { uuid: jobId, user_email: jobData.user_email },
-            UpdateExpression: "SET generated_scenes = :gs, updated_at = :now",
+            UpdateExpression: "SET generated_scenes = list_append(if_not_exists(generated_scenes, :empty_list), :new_scene), updated_at = :now",
             ExpressionAttributeValues: {
-              ":gs": dbScenes,
+              ":empty_list": [],
+              ":new_scene": [{ scene_id: Number(id), s3_key: s3Key }],
               ":now": getJakartaISOString()
             }
           }));
@@ -487,6 +476,41 @@ async function processComfyUICompletion(params) {
       }
       throw err;
     }
+  }
+
+  const requestType = queryParams?.["request-type"];
+  const isStandalone = ["MOTION_CONTROL", "FREE-TRIAL"].includes(requestType);
+  if (isStandalone) {
+    console.log(`[ComfyUI Webhook] Standalone job detected via request-type=${requestType}. Falling back to processKieAiCompletion.`);
+    
+    let userEmail = queryParams?.userEmail;
+    if (!userEmail) {
+      const { QueryCommand } = require("@aws-sdk/lib-dynamodb");
+      try {
+        const qRes = await dynamo.send(new QueryCommand({
+          TableName: USER_REQUEST_TABLE,
+          KeyConditionExpression: "#uuid = :u",
+          ExpressionAttributeNames: { "#uuid": "uuid" },
+          ExpressionAttributeValues: { ":u": jobId }
+        }));
+        userEmail = qRes.Items?.[0]?.user_email;
+      } catch (err) {
+        console.error(`[ComfyUI Webhook] Failed to resolve userEmail for standalone job ${jobId}:`, err.message);
+      }
+    }
+
+    return processKieAiCompletion({
+      taskId: body.task_id || body.id || jobId,
+      resultUrl,
+      mediaType: isImage ? "images" : "videos",
+      dynamo,
+      s3,
+      USER_REQUEST_TABLE,
+      S3_RESOURCE_BUCKET,
+      IMAGE_PROMPT_ID_INDEX: process.env.IMAGE_PROMPT_ID_INDEX,
+      VIDEO_PROMPT_ID_INDEX: process.env.VIDEO_PROMPT_ID_INDEX,
+      queryStringParameters: { ...queryParams, jobId, userEmail }
+    });
   }
 
   const { handleImageCallback, handleVideoCallback } = require("./stateMachine");

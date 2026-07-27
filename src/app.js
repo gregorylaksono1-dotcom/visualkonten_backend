@@ -9,10 +9,11 @@ const { response } = require("./utils");
 const { handleGetHello } = require("./handlers/hello");
 const { handleGetUser } = require("./handlers/user");
 const { handleGetCredit } = require("./handlers/credit");
-const { handleGetUsage } = require("./handlers/usage");
+const { handleGetUsage, handleRateUsage } = require("./handlers/usage");
 const { handleGetPricing, handleListPricing, handleLikePricing } = require("./handlers/pricing");
 const { handleGetTopup, handlePostSnap } = require("./handlers/topup");
 const { handlePostResource } = require("./handlers/resource");
+const { handleListVouchers, handleCreateVoucher, handleClaimVoucher, handleDeactivateVoucher, handleDeleteVoucher, handleActivateVoucher } = require("./handlers/voucher");
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
@@ -31,6 +32,13 @@ exports.handler = async (event) => {
     if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.orderId || pathParameters.order_id);
     if (route === "POST /snap") return handlePostSnap(event);
     if (route === "POST /resource") return handlePostResource(event);
+    if (route === "POST /vouchers/claim") return handleClaimVoucher(event);
+    if (route === "GET /admin/vouchers") return handleListVouchers(event);
+    if (route === "POST /admin/vouchers") return handleCreateVoucher(event);
+    if (route.startsWith("PUT /admin/vouchers/") && route.endsWith("/deactivate")) return handleDeactivateVoucher(event);
+    if (route.startsWith("PUT /admin/vouchers/") && route.endsWith("/activate")) return handleActivateVoucher(event);
+    if (route.startsWith("DELETE /admin/vouchers/")) return handleDeleteVoucher(event);
+    if (route.startsWith("PUT /usage/") && route.endsWith("/rating")) return handleRateUsage(event);
     if (route === "GET /jobs/status" || route === "POST /jobs/status") {
       const { handleBatchStatus } = require("./handlers/jobStatus");
       return handleBatchStatus(event);

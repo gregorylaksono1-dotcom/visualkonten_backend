@@ -73,8 +73,8 @@ async function generateGrokVideo(params) {
     if (resolvedDuration > 15) resolvedDuration = 15;
 
     // Grok supports 480p or 720p resolution
-    let resolvedResolution = "480p";
-    if (video_quality === "720p" || video_quality === "1080p") resolvedResolution = "720p";
+    let resolvedResolution = "720p";
+    if (video_quality === "480p") resolvedResolution = "480p";
 
     motionPrompt = `${motionPrompt.trim()}. DO NOT ALLOW: ${resolvedNegativePrompt}`;
 

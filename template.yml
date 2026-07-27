@@ -48,7 +48,7 @@ Parameters:
   FrontendCallbackUrl:
     Type: String
     Description: Frontend callback URL sesudah login Cognito
-    Default: http://localhost:3000/dashboard
+    Default: http://localhost:3000/generasi-video
   FrontendLogoutUrl:
     Type: String
     Description: Frontend URL sesudah logout Cognito
@@ -320,6 +320,10 @@ Resources:
           Fn::GetAtt:
           - CognitoPostAuthTriggerFunction
           - Arn
+        PostAuthentication:
+          Fn::GetAtt:
+          - CognitoPostAuthTriggerFunction
+          - Arn
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Condition: CreateUserPoolDomain
@@ -378,11 +382,13 @@ Resources:
       - name
       - phone_number
       - custom:term_and_condition
+      - custom:role
       WriteAttributes:
       - email
       - name
       - phone_number
       - custom:term_and_condition
+      - custom:role
       CallbackURLs:
       - Ref: FrontendCallbackUrl
       LogoutURLs:
@@ -394,7 +400,7 @@ Resources:
       StageName:
         Ref: ApiStageName
       Cors:
-        AllowMethods: '''GET,POST,OPTIONS'''
+        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
         AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'''
         AllowOrigin: '''*'''
         AllowCredentials: false
@@ -430,6 +436,9 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: PricingTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: VoucherTable
       - Version: '2012-10-17'
         Statement:
         - Effect: Allow
@@ -474,6 +483,8 @@ Resources:
           USER_REQUEST_USER_EMAIL_INDEX: UserEmailCreatedIndex
           PRICING_TABLE_NAME:
             Ref: PricingTable
+          VOUCHER_TABLE_NAME:
+            Ref: VoucherTable
           S3_RESOURCE_BUCKET:
             Ref: S3ResourceBucketName
           MIDTRANS_API_URL:
@@ -510,6 +521,13 @@ Resources:
               Ref: Api
             Path: /usage
             Method: get
+        PutRateUsage:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /usage/{uuid}/rating
+            Method: put
         BatchStatusGet:
           Type: Api
           Properties:
@@ -573,6 +591,48 @@ Resources:
               Ref: Api
             Path: /presigned
             Method: get
+        GetAdminVouchers:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /admin/vouchers
+            Method: get
+        PostAdminVoucher:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /admin/vouchers
+            Method: post
+        PutDeactivateVoucher:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /admin/vouchers/{voucher_code}/deactivate
+            Method: put
+        PutActivateVoucher:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /admin/vouchers/{voucher_code}/activate
+            Method: put
+        DeleteVoucher:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /admin/vouchers/{voucher_code}
+            Method: delete
+        PostClaimVoucher:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /vouchers/claim
+            Method: post
         HelloWorld:
           Type: Api
           Properties:
@@ -969,6 +1029,19 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
 
+  VoucherTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: VoucherTable${EnvironmentSuffix}
+      AttributeDefinitions:
+      - AttributeName: voucher_code
+        AttributeType: S
+      KeySchema:
+      - AttributeName: voucher_code
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL for active stage
@@ -1027,4 +1100,5 @@ Outputs:
 
 # check log di prod
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production
+# sam logs -n ComfyUIWebhookFunction --stack-name BikinAi-backend-prod --profile production --region ap-southeast-1 --tail
 

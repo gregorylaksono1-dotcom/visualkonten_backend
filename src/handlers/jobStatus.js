@@ -58,6 +58,10 @@ exports.handleBatchStatus = async (event) => {
                 aspect_ratio: item.aspect_ratio ?? null,
                 generated_scenes: item.generated_scenes ?? null,
                 error_message: item.error_message ?? null,
+                preview_duration: item.preview_duration ?? null,
+                video_generation_duration: item.video_generation_duration ?? null,
+                rating: item.rating ?? null,
+                review_text: item.review_text ?? null,
                 result_url: item.result_url || null,
                 generated_image: item.generated_image || null
             };

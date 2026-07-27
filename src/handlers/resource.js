@@ -4,6 +4,7 @@ const https = require("https");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
 const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction, docClient, GetCommand } = require("../services");
+const { sendTelegramMessage } = require("../lib/telegram");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
 const GENERATION_BACKEND = process.env.GENERATION_BACKEND || "comfyui";
@@ -46,7 +47,7 @@ exports.handlePostResource = async (event) => {
       }
 
       const profileItem = await getCustomerProfile(userId);
-      const isFreeTrial = Number(profileItem.free_trial || 0) === 1;
+      const isFreeTrial = Number(profileItem.free_trial || 0) > 0;
       let isFreeTrialUsed = false;
 
       const pricing = await resolvePricingRow(requestItem.request_type);
@@ -195,6 +196,7 @@ exports.handlePostResource = async (event) => {
         });
       }
 
+      await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestItem.request_type}`).catch(console.error);
       return response(200, { data: { ...putItem } });
     } catch (err) {
       console.error("generate_video action error:", err);
@@ -280,7 +282,7 @@ exports.handlePostResource = async (event) => {
   }
 
   const profileItem = await getCustomerProfile(userId);
-  const isFreeTrial = Number(profileItem.free_trial || 0) === 1;
+  const isFreeTrial = Number(profileItem.free_trial || 0) > 0;
   let isFreeTrialUsed = false;
 
   let finalAmount = pricing.amount;
@@ -441,6 +443,7 @@ exports.handlePostResource = async (event) => {
     return response(502, { error: "Gagal memulai proses generate." });
   }
 
+  await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
   return response(200, { data: { ...putItem } });
 };
 exports.handleGetPresigned = async (event) => {

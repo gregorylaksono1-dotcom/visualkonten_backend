@@ -156,7 +156,7 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
 
     let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -shortest ${outputPath}`;
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac ${outputPath}`;
     }
 
     console.log(`[FFmpeg Merge] Running command: ${cmd}`);
@@ -253,12 +253,7 @@ async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, ref
   let resolvedAspectRatio = "9:16";
   const hasImages = Array.isArray(referenceUrls) && referenceUrls.length > 0;
   
-  let model;
-  if (requestType === "ANIMASI_1" || requestType === "problemsolutionAnimation" || String(requestType).toUpperCase().startsWith("ANIMASI")) {
-    model = "nano-banana-2-lite";
-  } else {
-    model = hasImages ? "gpt-image-2-image-to-image" : "gpt-image-2-text-to-image";
-  }
+  const model = "nano-banana-2-lite";
   const input = {
     prompt,
     aspect_ratio: resolvedAspectRatio

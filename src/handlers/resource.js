@@ -18,6 +18,12 @@ exports.handlePostResource = async (event) => {
 
   const body = parseBody(event);
   console.log("action", body.action);
+  
+  if (body.action === "log_search") {
+    console.log(`mencari ${body.query || ""}`);
+    return response(200, { message: "logged" });
+  }
+
   if (body.action === "generate_video") {
     const uuid = body.uuid;
     if (!uuid) return response(400, { error: "uuid is required for generate_video action." });

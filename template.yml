@@ -135,6 +135,18 @@ Parameters:
     AllowedValues:
     - 'true'
     - 'false'
+  RemotionAwsRegion:
+    Type: String
+    Description: Region untuk Remotion Lambda
+    Default: us-east-1
+  RemotionFunctionName:
+    Type: String
+    Description: Nama function AWS Lambda dari Remotion
+    Default: remotion-render-function
+  RemotionServeUrl:
+    Type: String
+    Description: S3 Serve URL untuk bundle React Remotion
+    Default: https://remotionlambda-xxx.s3.amazonaws.com/sites/post-production-site/index.html
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -788,6 +800,9 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: UserRequestTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: ProfileTable
       - Version: '2012-10-17'
         Statement:
         - Effect: Allow
@@ -806,6 +821,8 @@ Resources:
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
+          PROFILE_TABLE_NAME:
+            Ref: ProfileTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
@@ -842,6 +859,8 @@ Resources:
             Ref: UserRequestTable
       - DynamoDBCrudPolicy:
           TableName: !Ref PricingTable
+      - DynamoDBCrudPolicy:
+          TableName: !Ref ProfileTable
       - AWSLambdaBasicExecutionRole
       - Version: '2012-10-17'
         Statement:
@@ -876,6 +895,8 @@ Resources:
             Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
       Environment:
         Variables:
+          PROFILE_TABLE_NAME:
+            Ref: ProfileTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
@@ -899,6 +920,77 @@ Resources:
 
     Metadata:
       SamResourceId: ComfyUIWorkerFunction
+
+  PostProductionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-post-production/
+      Handler: postProductionWorker.handler
+      Runtime: nodejs22.x
+      Timeout: 900
+      MemorySize: 1024
+      Architectures:
+      - x86_64
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - AmazonS3FullAccess
+      - AWSLambda_FullAccess
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:InvokeFunction
+          Resource: "*"
+      Environment:
+        Variables:
+          REMOTION_AWS_REGION: !Ref RemotionAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionServeUrl
+          WEBHOOK_URL: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/remotion/webhook"
+          # DEP0040: transitive deps (google-auth) still require('punycode') on Node 22
+          NODE_OPTIONS: --disable-warning=DEP0040
+    Metadata:
+      SamResourceId: PostProductionFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - postProductionWorker.js
+        External:
+        - "@aws-sdk/client-sfn"
+
+  RemotionWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: remotionWebhook.handler
+      Runtime: nodejs22.x
+      Timeout: 30
+      MemorySize: 256
+      Architectures:
+      - x86_64
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - states:SendTaskSuccess
+          - states:SendTaskFailure
+          Resource: "*"
+      Events:
+        RemotionWebhook:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /remotion/webhook
+            Method: post
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: RemotionWebhookFunction
   CognitoInvokePermissionForPostAuth:
     Type: AWS::Lambda::Permission
     Properties:
@@ -993,6 +1085,12 @@ Resources:
           Resource:
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+        - Effect: Allow
+          Action:
+          - states:RedriveExecution
+          - states:DescribeExecution
+          Resource:
+          - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-VideoGeneration${EnvironmentSuffix}:*
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME:
@@ -1020,12 +1118,19 @@ Resources:
     Properties:
       Name: !Sub BikinAi-VideoGeneration${EnvironmentSuffix}
       DefinitionUri: statemachine/video_generation.asl.json
+      Tags:
+        DeployHack: ForceUpdate3
+          
+
       DefinitionSubstitutions:
         ComfyUIWorkerFunctionArn: !GetAtt ComfyUIWorkerFunction.Arn
+        PostProductionFunctionArn: !GetAtt PostProductionFunction.Arn
         UserRequestTableName: !Ref UserRequestTable
       Policies:
         - LambdaInvokePolicy:
             FunctionName: !Ref ComfyUIWorkerFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PostProductionFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
 

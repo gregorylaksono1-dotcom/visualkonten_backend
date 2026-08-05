@@ -4,7 +4,7 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, QueryCommand, UpdateCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const { SFNClient, StartExecutionCommand, RedriveExecutionCommand } = require("@aws-sdk/client-sfn");
 const { getSecrets, getConfig } = require("../lib/config");
-const { getKieAiKey, s3Client, getSignedUrl } = require("../services");
+const { getKieAiKey, s3Client, getSignedUrl, findPricingItem } = require("../services");
 const { GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getJakartaISOString } = require("../utils");
 const { exec } = require("child_process");
@@ -253,6 +253,18 @@ async function prepareJobData(payload) {
     });
   }
 
+  let pricingPostProduction = false;
+  if (requestType) {
+    try {
+      const pricingItem = await findPricingItem(requestType);
+      if (pricingItem && pricingItem["post-production"] === true) {
+        pricingPostProduction = true;
+      }
+    } catch (err) {
+      console.warn(`[SFN Orchestrator] Failed to fetch pricing for ${requestType}:`, err.message);
+    }
+  }
+
   return {
     jobId,
     userEmail,
@@ -263,7 +275,8 @@ async function prepareJobData(payload) {
     audio_duration: audio_duration || null,
     aspect_ratio: aspectRatio || "9:16",
     request_type: requestType,
-    llm_response: llmResponse
+    llm_response: llmResponse,
+    pricing_post_production: pricingPostProduction
   };
 }
 
@@ -641,9 +654,9 @@ async function mergeVideoScenes(payload) {
 
     const outputPath = path.join(tmpDir, `output_${jobId}.mp4`);
 
-    let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
+    let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy -movflags +faststart ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac ${outputPath}`;
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
     }
 
     console.log(`[SFN Orchestrator Merge] Running FFmpeg: ${cmd}`);

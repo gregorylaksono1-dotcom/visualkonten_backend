@@ -48,7 +48,7 @@ Parameters:
   FrontendCallbackUrl:
     Type: String
     Description: Frontend callback URL sesudah login Cognito
-    Default: http://localhost:3000/generasi-video
+    Default: http://localhost:3000/dashboard
   FrontendLogoutUrl:
     Type: String
     Description: Frontend URL sesudah logout Cognito
@@ -91,7 +91,8 @@ Parameters:
     - comfyui
   FreeTrialBackend:
     Type: String
-    Description: Backend generasi video untuk FREE-TRIAL. "comfyui" = ComfyUI Cloud; "vertex_ai" = Vertex AI (Veo)
+    Description: Backend generasi video untuk FREE-TRIAL. "comfyui" = ComfyUI Cloud;
+      "vertex_ai" = Vertex AI (Veo)
     Default: comfyui
     AllowedValues:
     - comfyui
@@ -102,14 +103,14 @@ Parameters:
     Default: 1
   UsePromptRefactor:
     Type: String
-    Description: 'true = pipeline prompt 3-layer (UGC); false = prompt monolitik legacy'
+    Description: true = pipeline prompt 3-layer (UGC); false = prompt monolitik legacy
     Default: 'false'
     AllowedValues:
     - 'true'
     - 'false'
   generationManual:
     Type: String
-    Description: 'true = manual generation; false = hit comfyui'
+    Description: true = manual generation; false = hit comfyui
     Default: 'false'
     AllowedValues:
     - 'true'
@@ -130,23 +131,11 @@ Parameters:
     MaxValue: 60
   Runpod:
     Type: String
-    Description: 'true = enable Runpod S3 upload; false = regular workflow'
+    Description: true = enable Runpod S3 upload; false = regular workflow
     Default: 'false'
     AllowedValues:
     - 'true'
     - 'false'
-  RemotionAwsRegion:
-    Type: String
-    Description: Region untuk Remotion Lambda
-    Default: us-east-1
-  RemotionFunctionName:
-    Type: String
-    Description: Nama function AWS Lambda dari Remotion
-    Default: remotion-render-function
-  RemotionServeUrl:
-    Type: String
-    Description: S3 Serve URL untuk bundle React Remotion
-    Default: https://remotionlambda-xxx.s3.amazonaws.com/sites/post-production-site/index.html
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -198,6 +187,8 @@ Resources:
       - AttributeName: user_type
         KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: ProfileTable
   TopupCreditTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -225,6 +216,8 @@ Resources:
         Projection:
           ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: TopupCreditTable
   UserRequestTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -278,6 +271,8 @@ Resources:
         Projection:
           ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: UserRequestTable
   PricingTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -294,6 +289,8 @@ Resources:
       - AttributeName: charge
         KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: PricingTable
   TransactionTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -310,6 +307,8 @@ Resources:
       - AttributeName: transaction_status
         KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
+    Metadata:
+      SamResourceId: TransactionTable
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -332,10 +331,8 @@ Resources:
           Fn::GetAtt:
           - CognitoPostAuthTriggerFunction
           - Arn
-        PostAuthentication:
-          Fn::GetAtt:
-          - CognitoPostAuthTriggerFunction
-          - Arn
+    Metadata:
+      SamResourceId: UserPool
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Condition: CreateUserPoolDomain
@@ -353,6 +350,8 @@ Resources:
         - CertificateArn:
             Ref: CognitoCustomDomainCertificateArn
         - Ref: AWS::NoValue
+    Metadata:
+      SamResourceId: UserPoolDomain
   GoogleIdentityProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
     Properties:
@@ -370,6 +369,8 @@ Resources:
         email: email
         username: sub
         name: name
+    Metadata:
+      SamResourceId: GoogleIdentityProvider
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
@@ -394,25 +395,25 @@ Resources:
       - name
       - phone_number
       - custom:term_and_condition
-      - custom:role
       WriteAttributes:
       - email
       - name
       - phone_number
       - custom:term_and_condition
-      - custom:role
       CallbackURLs:
       - Ref: FrontendCallbackUrl
       LogoutURLs:
       - Ref: FrontendLogoutUrl
     DependsOn: GoogleIdentityProvider
+    Metadata:
+      SamResourceId: UserPoolClient
   Api:
     Type: AWS::Serverless::Api
     Properties:
       StageName:
         Ref: ApiStageName
       Cors:
-        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
+        AllowMethods: '''GET,POST,OPTIONS'''
         AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'''
         AllowOrigin: '''*'''
         AllowCredentials: false
@@ -425,10 +426,12 @@ Resources:
               Fn::GetAtt:
               - UserPool
               - Arn
+    Metadata:
+      SamResourceId: Api
   HelloWorldFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: app.handler
       Runtime: nodejs22.x
       Timeout: 30
@@ -448,9 +451,6 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: PricingTable
-      - DynamoDBCrudPolicy:
-          TableName:
-            Ref: VoucherTable
       - Version: '2012-10-17'
         Statement:
         - Effect: Allow
@@ -495,8 +495,6 @@ Resources:
           USER_REQUEST_USER_EMAIL_INDEX: UserEmailCreatedIndex
           PRICING_TABLE_NAME:
             Ref: PricingTable
-          VOUCHER_TABLE_NAME:
-            Ref: VoucherTable
           S3_RESOURCE_BUCKET:
             Ref: S3ResourceBucketName
           MIDTRANS_API_URL:
@@ -519,13 +517,6 @@ Resources:
               Ref: Api
             Path: /user
             Method: get
-        PostUserSeller:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /user/seller
-            Method: post
         GetCredit:
           Type: Api
           Properties:
@@ -540,13 +531,6 @@ Resources:
               Ref: Api
             Path: /usage
             Method: get
-        PutRateUsage:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /usage/{uuid}/rating
-            Method: put
         BatchStatusGet:
           Type: Api
           Properties:
@@ -610,48 +594,6 @@ Resources:
               Ref: Api
             Path: /presigned
             Method: get
-        GetAdminVouchers:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /admin/vouchers
-            Method: get
-        PostAdminVoucher:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /admin/vouchers
-            Method: post
-        PutDeactivateVoucher:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /admin/vouchers/{voucher_code}/deactivate
-            Method: put
-        PutActivateVoucher:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /admin/vouchers/{voucher_code}/activate
-            Method: put
-        DeleteVoucher:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /admin/vouchers/{voucher_code}
-            Method: delete
-        PostClaimVoucher:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /vouchers/claim
-            Method: post
         HelloWorld:
           Type: Api
           Properties:
@@ -661,30 +603,12 @@ Resources:
             Method: get
             Auth:
               Authorizer: NONE
-        MockKieAi:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /mock-kieai
-            Method: any
-            Auth:
-              Authorizer: NONE
-        MockKieAiProxy:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /mock-kieai/{proxy+}
-            Method: any
-            Auth:
-              Authorizer: NONE
     Metadata:
       SamResourceId: HelloWorldFunction
   CognitoPostAuthTriggerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: postAuth.handler
       Runtime: nodejs22.x
       Architectures:
@@ -702,7 +626,7 @@ Resources:
   MidtransWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: midtransWebhook.handler
       Runtime: nodejs22.x
       Architectures:
@@ -740,7 +664,7 @@ Resources:
   LambdaGcpBucketWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: lambdaGcpBucketWebhook.handler
       Runtime: nodejs22.x
       Timeout: 300
@@ -778,7 +702,6 @@ Resources:
             Ref: UserRequestTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
-          # DEP0040: transitive deps (google-auth) still require('punycode') on Node 22
           NODE_OPTIONS: --disable-warning=DEP0040
       Events:
         LambdaGcpBucketWebhook:
@@ -795,7 +718,7 @@ Resources:
   FreeTrialWorkerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: freeTrialWorker.handler
       Runtime: nodejs22.x
       Timeout: 300
@@ -807,9 +730,6 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: UserRequestTable
-      - DynamoDBCrudPolicy:
-          TableName:
-            Ref: ProfileTable
       - Version: '2012-10-17'
         Statement:
         - Effect: Allow
@@ -828,8 +748,6 @@ Resources:
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          PROFILE_TABLE_NAME:
-            Ref: ProfileTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
@@ -853,57 +771,38 @@ Resources:
   ComfyUIWorkerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
-      Handler: videoGenerator.handler
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
+      Handler: comfyuiWorker.handler
       Runtime: nodejs22.x
       Timeout: 600
-      MemorySize: 1024
+      MemorySize: 256
       Architectures:
       - x86_64
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: UserRequestTable
-      - DynamoDBCrudPolicy:
-          TableName: !Ref PricingTable
-      - DynamoDBCrudPolicy:
-          TableName: !Ref ProfileTable
       - AWSLambdaBasicExecutionRole
       - Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Action:
-              - dynamodb:GetItem
-              - dynamodb:Query
-              - dynamodb:Scan
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PricingTable}
-          - Effect: Allow
-            Action:
-              - s3:PutObject
-              - s3:GetObject
-            Resource:
-              Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
-          - Effect: Allow
-            Action:
-              - ssm:GetParameter
-              - ssm:GetParameters
-              - ssm:GetParametersByPath
-            Resource:
-              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
-              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
-          - Effect: Allow
-            Action:
-              - states:StartExecution
-              - states:RedriveExecution
-              - states:StopExecution
-              - states:DescribeExecution
-              - states:SendTaskSuccess
-              - states:SendTaskFailure
-            Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
+        - Effect: Allow
+          Action:
+          - s3:PutObject
+          - s3:GetObject
+          Resource:
+            Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
       Environment:
         Variables:
-          PROFILE_TABLE_NAME:
-            Ref: ProfileTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
@@ -921,90 +820,15 @@ Resources:
             Ref: UsePromptRefactor
           RUNPOD:
             Ref: Runpod
-          PRICING_TABLE_NAME:
-            Ref: PricingTable
-          STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
-
+      Events:
+        ComfyUIPollSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Description: Poll ComfyUI Cloud status for processing jobs
+            Enabled: true
     Metadata:
       SamResourceId: ComfyUIWorkerFunction
-
-  PostProductionFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src-post-production/
-      Handler: postProductionWorker.handler
-      Runtime: nodejs22.x
-      Timeout: 900
-      MemorySize: 1024
-      Architectures:
-      - x86_64
-      Policies:
-      - AWSLambdaBasicExecutionRole
-      - AmazonS3FullAccess
-      - AWSLambda_FullAccess
-      - Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Action:
-          - lambda:InvokeFunction
-          Resource: "*"
-      Environment:
-        Variables:
-          REMOTION_AWS_REGION: !Ref RemotionAwsRegion
-          REMOTION_FUNCTION_NAME: !Ref RemotionFunctionName
-          REMOTION_SERVE_URL: !Ref RemotionServeUrl
-          WEBHOOK_URL: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/remotion/webhook"
-          # DEP0040: transitive deps (google-auth) still require('punycode') on Node 22
-          NODE_OPTIONS: --disable-warning=DEP0040
-    Metadata:
-      SamResourceId: PostProductionFunction
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: true
-        Target: "es2022"
-        EntryPoints:
-        - postProductionWorker.js
-        External:
-        - "@aws-sdk/client-sfn"
-
-  RemotionWebhookFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/
-      Handler: remotionWebhook.handler
-      Runtime: nodejs22.x
-      Timeout: 30
-      MemorySize: 256
-      Architectures:
-      - x86_64
-      Policies:
-      - AWSLambdaBasicExecutionRole
-      - Version: '2012-10-17'
-        Statement:
-        - Effect: Allow
-          Action:
-          - states:SendTaskSuccess
-          - states:SendTaskFailure
-          Resource: "*"
-        - Effect: Allow
-          Action:
-          - s3:GetObject
-          - s3:PutObject
-          Resource:
-          - Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
-          - arn:aws:s3:::remotionlambda-*
-      Events:
-        RemotionWebhook:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /remotion/webhook
-            Method: post
-            Auth:
-              Authorizer: NONE
-    Metadata:
-      SamResourceId: RemotionWebhookFunction
   CognitoInvokePermissionForPostAuth:
     Type: AWS::Lambda::Permission
     Properties:
@@ -1016,66 +840,51 @@ Resources:
         Fn::GetAtt:
         - UserPool
         - Arn
+    Metadata:
+      SamResourceId: CognitoInvokePermissionForPostAuth
   ComfyUIWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: handlers/comfyuiWebhook.handler
       Runtime: nodejs22.x
       Timeout: 30
-      MemorySize: 512 # Increase memory for image processing/download
+      MemorySize: 512
       Policies:
       - DynamoDBCrudPolicy:
-          TableName: !Ref UserRequestTable
+          TableName:
+            Ref: UserRequestTable
       - S3CrudPolicy:
-          BucketName: !Ref S3ResourceBucketName
-      - Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Action:
-              - ssm:GetParameter
-              - ssm:GetParameters
-              - ssm:GetParametersByPath
-            Resource:
-              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
-              - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
-          - Effect: Allow
-            Action:
-              - states:SendTaskSuccess
-              - states:SendTaskFailure
-            Resource: "*"
+          BucketName:
+            Ref: S3ResourceBucketName
       Environment:
         Variables:
-          CONFIG_SSM_PATH: !Ref ConfigSsmPath
-          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
-          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME:
+            Ref: UserRequestTable
+          S3_RESOURCE_BUCKET:
+            Ref: S3ResourceBucketName
           IMAGE_PROMPT_ID_INDEX: ImagePromptIdIndex
           VIDEO_PROMPT_ID_INDEX: ComfyPromptIdIndex
-          UPSTASH_REDIS_REST_URL: !Ref UpstashRedisRestUrl
-          UPSTASH_REDIS_REST_TOKEN: !Ref UpstashRedisRestToken
-          STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
+          UPSTASH_REDIS_REST_URL:
+            Ref: UpstashRedisRestUrl
+          UPSTASH_REDIS_REST_TOKEN:
+            Ref: UpstashRedisRestToken
       Events:
         ComfyUIWebhookEvent:
           Type: Api
           Properties:
             Path: /comfyui-webhook
             Method: post
-            RestApiId: !Ref Api
-            Auth:
-              Authorizer: NONE # Webhook usually doesn't have Cognito auth
-        ComfyUIWebhookEventProxy:
-          Type: Api
-          Properties:
-            Path: /comfyui-webhook/{proxy+}
-            Method: post
-            RestApiId: !Ref Api
+            RestApiId:
+              Ref: Api
             Auth:
               Authorizer: NONE
-
+    Metadata:
+      SamResourceId: ComfyUIWebhookFunction
   RecoveryCronFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
+      CodeUri: s3://aws-sam-cli-managed-default-samclisourcebucket-tozrbzmm4nv8/c579511b4d3af116a8761b7c0b7abf5a
       Handler: recoveryCron.handler
       Runtime: nodejs22.x
       Timeout: 900
@@ -1099,12 +908,6 @@ Resources:
           Resource:
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
-        - Effect: Allow
-          Action:
-          - states:RedriveExecution
-          - states:DescribeExecution
-          Resource:
-          - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-VideoGeneration${EnvironmentSuffix}:*
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME:
@@ -1126,41 +929,8 @@ Resources:
             Schedule: rate(2 minutes)
             Description: Recover stalled jobs and retry concurrency failures
             Enabled: true
-
-  VideoGenerationStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      Name: !Sub BikinAi-VideoGeneration${EnvironmentSuffix}
-      DefinitionUri: statemachine/video_generation.asl.json
-      Tags:
-        DeployHack: ForceUpdate3
-          
-
-      DefinitionSubstitutions:
-        ComfyUIWorkerFunctionArn: !GetAtt ComfyUIWorkerFunction.Arn
-        PostProductionFunctionArn: !GetAtt PostProductionFunction.Arn
-        UserRequestTableName: !Ref UserRequestTable
-      Policies:
-        - LambdaInvokePolicy:
-            FunctionName: !Ref ComfyUIWorkerFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref PostProductionFunction
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UserRequestTable
-
-  VoucherTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName:
-        Fn::Sub: VoucherTable${EnvironmentSuffix}
-      AttributeDefinitions:
-      - AttributeName: voucher_code
-        AttributeType: S
-      KeySchema:
-      - AttributeName: voucher_code
-        KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-
+    Metadata:
+      SamResourceId: RecoveryCronFunction
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL for active stage
@@ -1208,16 +978,3 @@ Outputs:
     Description: Webhook URL for GCP Pub/Sub fileCreated push
     Value:
       Fn::Sub: https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/gcp/bucket-webhook
-  VideoGenerationStateMachineArn:
-    Description: ARN of the Step Functions Video Generation State Machine
-    Value: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
-
-# sam build && sam deploy --config-env production --profile production
-
-# check log di dev
-# sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
-
-# check log di prod
-# sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production
-# sam logs -n ComfyUIWebhookFunction --stack-name BikinAi-backend-prod --profile production --region ap-southeast-1 --tail
-

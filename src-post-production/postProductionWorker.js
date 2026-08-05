@@ -43,6 +43,7 @@ exports.handler = async (event, context) => {
 
     let finalVideoUrl = videoUrl;
     let isS3 = false;
+    let bucketName, s3Region, key;
 
     // Detect if videoUrl is an S3 URL (HTTPS or s3:// format)
     const httpsMatch = videoUrl.match(/^https:\/\/([^.]+)\.s3\.([^.]+)\.amazonaws\.com\/(.+)$/);
@@ -54,8 +55,6 @@ exports.handler = async (event, context) => {
       const { S3Client, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
       const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
       
-      let bucketName, s3Region, key;
-
       if (httpsMatch) {
         bucketName = httpsMatch[1];
         s3Region = httpsMatch[2];
@@ -117,7 +116,10 @@ exports.handler = async (event, context) => {
         url: WEBHOOK_URL,
         customData: {
           taskToken,
-          jobId
+          jobId,
+          originalBucket: bucketName,
+          originalKey: key,
+          originalUrl: event.videoUrl
         }
       } : undefined
     });

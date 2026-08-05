@@ -154,9 +154,9 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
     const outputPath = path.join(tmpDir, `output_${job.uuid}.mp4`);
     const ffmpegCmd = await ensureFfmpegBinary();
 
-    let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
+    let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy -movflags +faststart ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac ${outputPath}`;
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
     }
 
     console.log(`[FFmpeg Merge] Running command: ${cmd}`);

@@ -23,6 +23,7 @@ const {
 } = require("./services");
 const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
+const { sendTelegramMessage } = require("./lib/telegram");
 const { generateUgcLlmResponse } = require("./core/ugcLlm");
 const { generateMultiScenePipeline } = require("./core/ugcWorkflowGeneration");
 const { generateProductCinematicPipeline } = require("./core/productCinematikWorkflow");
@@ -35,7 +36,7 @@ const REGION = process.env.AWS_REGION || "ap-southeast-1";
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
-const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId, videoGenerationDuration, error_message } = {}) => {
+const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId, videoGenerationDuration, error_message, llm_reason } = {}) => {
   const updates = ["#s = :s", "updated_at = :u"];
   const names = { "#s": "status" };
   const values = { ":s": status, ":u": getJakartaISOString() };
@@ -55,6 +56,10 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
   if (error_message !== undefined && error_message !== null) {
     updates.push("error_message = :err");
     values[":err"] = error_message;
+  }
+  if (llm_reason !== undefined && llm_reason !== null) {
+    updates.push("llm_reason = :llmr");
+    values[":llmr"] = llm_reason;
   }
 
   try {
@@ -257,6 +262,7 @@ const handleSubmission = async (event) => {
         USER_REQUEST_TABLE,
         S3_RESOURCE_BUCKET
       });
+      await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
       return;
     } catch (err) {
       console.error(`[Worker] Error executing motion control handler for job ${jobId}:`, err);
@@ -300,6 +306,12 @@ const handleSubmission = async (event) => {
     } catch (err) {
       console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
       await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+      
+      if (existingJob.credit_amount) {
+        const { refundUserCredit } = require("./services");
+        const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
+        await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
+      }
       return;
     }
   }
@@ -415,6 +427,7 @@ const handleSubmission = async (event) => {
           requestType,
           startTime: submissionStartTime
         });
+        await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
         return;
       }
 
@@ -422,8 +435,25 @@ const handleSubmission = async (event) => {
 
       if (llmResponse) {
         try {
+          if (llmResponse.status === "error") {
+            const reason = llmResponse.reason || "Permintaan tidak valid, masukkan deskripsi produk yang benar.";
+            console.log(`[Worker] LLM rejected the prompt for job ${jobId}. Reason: ${reason}`);
+            await updateDynamoStatus(jobId, userEmail, "ERROR_LLM", { 
+              error_message: reason,
+              llm_reason: reason
+            });
+
+            if (existingJob.credit_amount) {
+              const { refundUserCredit } = require("./services");
+              const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
+              await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
+            }
+            await sendTelegramMessage(`${userEmail} error_llm ${reason}`).catch(console.error);
+            return;
+          }
 
           console.log(`[Worker] Starting KIE.ai Step Function for job ${jobId}`);
+          await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
           const { triggerStateMachine } = require("./core/sfnOrchestrator");
           await triggerStateMachine({
             jobId,

@@ -15,6 +15,7 @@ exports.handleGetPricing = async (event, pricingKeyParam) => {
       amount: resolved.amount, 
       attr: resolved.item.attr,
       description: resolved.item.description || null,
+      sample: resolved.item.sample,
       coming_soon: resolved.item.coming_soon === true || resolved.item.coming_soon === "true"
     },
   });
@@ -49,6 +50,7 @@ exports.handleListPricing = async (event) => {
         description: item.description || null,
         popularity: item.popularity !== undefined ? Number(item.popularity) : 0,
         coming_soon: item.coming_soon === true || item.coming_soon === "true",
+        type: item.type,
       };
     });
     return response(200, { data: formatted });

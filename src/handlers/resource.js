@@ -3,7 +3,7 @@ const path = require("path");
 const https = require("https");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
-const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction, docClient, GetCommand } = require("../services");
+const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction, docClient, GetCommand, UpdateCommand } = require("../services");
 const { sendTelegramMessage } = require("../lib/telegram");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -23,6 +23,41 @@ exports.handlePostResource = async (event) => {
     console.log(`mencari ${body.query || ""}`);
     return response(200, { message: "logged" });
   }
+
+  if (body.action === "request_template") {
+    const requestedTemplate = body.template || "";
+    if (requestedTemplate) {
+      await sendTelegramMessage(`Dari ${userEmail}. Template : ${requestedTemplate}`);
+    }
+    return response(200, { message: "Template request sent" });
+  }
+  if (body.action === "request_regenerate") {
+    const uuid = body.uuid;
+    if (uuid) {
+      try {
+        const updateResult = await docClient.send(new UpdateCommand({
+          TableName: process.env.USER_REQUEST_TABLE_NAME,
+          Key: { uuid: uuid, user_email: userEmail },
+          UpdateExpression: "SET is_regenerate_requested = :true_val",
+          ExpressionAttributeValues: {
+            ":true_val": true
+          },
+          ReturnValues: "ALL_NEW"
+        }));
+
+        const item = updateResult.Attributes || {};
+        const isFreeTrial = item.request_type === "FREE_STORY" ? "Ya" : "Tidak";
+        const creditSpent = item.credit_amount || 0;
+
+        await sendTelegramMessage(`User ${userEmail} request ${uuid} generasi ulang.\nFree Trial: ${isFreeTrial}\nCredit Dihabiskan: ${creditSpent}`);
+      } catch (err) {
+        console.error("Error updating user_request for regenerate:", err);
+        await sendTelegramMessage(`user ${userEmail} request ${uuid} generasi ulang (Gagal mengambil rincian credit)`);
+      }
+    }
+    return response(200, { message: "Request generasi ulang terkirim" });
+  }
+
 
   if (body.action === "generate_video") {
     const uuid = body.uuid;
@@ -202,7 +237,6 @@ exports.handlePostResource = async (event) => {
         });
       }
 
-      await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestItem.request_type}`).catch(console.error);
       return response(200, { data: { ...putItem } });
     } catch (err) {
       console.error("generate_video action error:", err);
@@ -293,19 +327,28 @@ exports.handlePostResource = async (event) => {
 
   let finalAmount = pricing.amount;
   const requestTypeUpperVal = String(requestType || "").toUpperCase();
-  if (requestTypeUpperVal === "MOTION_CONTROL") {
+  if (requestTypeUpperVal === "MOTION_CONTROL" || requestTypeUpperVal === "FREE_STORY") {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
     } catch (e) { }
-    const chosenDur = String(body.duration_seconds || 10);
-    if (!parsedAttr || parsedAttr[chosenDur] === undefined) {
-      return response(400, {
-        error: "Kredit dan durasi tidak sesuai",
-        error_code: "INVALID_DURATION_PRICING"
-      });
+    const chosenDur = String(body.duration_seconds || body.duration || (requestTypeUpperVal === "MOTION_CONTROL" ? 10 : 20));
+    
+    if (parsedAttr) {
+      if (!isPreview && isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+        finalAmount = Number(parsedAttr["freetrial"]);
+        isFreeTrialUsed = true;
+      } else {
+        if (parsedAttr[chosenDur] === undefined) {
+          return response(400, {
+            error: "Kredit dan durasi tidak sesuai",
+            error_code: "INVALID_DURATION_PRICING"
+          });
+        }
+        finalAmount = Number(parsedAttr[chosenDur]);
+      }
     }
-    finalAmount = Number(parsedAttr[chosenDur]);
+
   } else if (pricing.item.attr) {
     let parsedAttr = null;
     try {
@@ -388,6 +431,7 @@ exports.handlePostResource = async (event) => {
     created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
     ugc_mode: body.ugc_mode || null,
     store_type: body.store_type || null,
+    story_type: body.story_type || null,
     free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
     preview: isPreview ? 1 : 0,
     video_gen_start_at: isPreview ? null : now,
@@ -417,6 +461,7 @@ exports.handlePostResource = async (event) => {
     userId,
     ugc_mode: body.ugc_mode || null,
     store_type: body.store_type || null,
+    story_type: body.story_type || null,
     selling_mode: body.selling_mode || null,
     video_duration: body.video_duration || null,
     voice_selection_mode: body.voice_selection_mode || null,
@@ -449,7 +494,6 @@ exports.handlePostResource = async (event) => {
     return response(502, { error: "Gagal memulai proses generate." });
   }
 
-  await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
   return response(200, { data: { ...putItem } });
 };
 exports.handleGetPresigned = async (event) => {

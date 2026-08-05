@@ -2,6 +2,9 @@
 
 const https = require("https");
 
+const ssmPath = process.env.CONFIG_SSM_PATH || "";
+const isDev = ssmPath.includes("/dev") || ssmPath === "" || ssmPath === "/visualkonten/dev";
+
 const TELEGRAM_TOKEN = "8611691550:AAF5omYCHcqn7-bulHn3HQPJ6b4-mWOLObU";
 const TELEGRAM_CHAT_ID = "7989331780";
 
@@ -10,6 +13,11 @@ const TELEGRAM_CHAT_ID = "7989331780";
  * @param {string} text 
  */
 function sendTelegramMessage(text) {
+  if (isDev) {
+    console.log("[Telegram] Disabled in dev environment. Skipped message:", text);
+    return Promise.resolve(null);
+  }
+
   return new Promise((resolve, reject) => {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
     https.get(url, (res) => {

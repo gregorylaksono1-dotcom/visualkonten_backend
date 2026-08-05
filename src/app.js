@@ -7,7 +7,7 @@
 
 const { response } = require("./utils");
 const { handleGetHello } = require("./handlers/hello");
-const { handleGetUser } = require("./handlers/user");
+const { handleGetUser, handlePostSellerFeedback } = require("./handlers/user");
 const { handleGetCredit } = require("./handlers/credit");
 const { handleGetUsage, handleRateUsage } = require("./handlers/usage");
 const { handleGetPricing, handleListPricing, handleLikePricing } = require("./handlers/pricing");
@@ -24,6 +24,7 @@ exports.handler = async (event) => {
 
     if (route === "GET /hello") return handleGetHello();
     if (route === "GET /user") return handleGetUser(event);
+    if (route === "POST /user/seller") return handlePostSellerFeedback(event);
     if (route === "GET /credit") return handleGetCredit(event);
     if (route === "GET /usage") return handleGetUsage(event);
     if (route === "GET /pricing") return handleListPricing(event);

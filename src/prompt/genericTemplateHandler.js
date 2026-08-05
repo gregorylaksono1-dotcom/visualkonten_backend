@@ -156,12 +156,55 @@ async function handleGenericTemplate(params) {
     // 2. Build system and user prompts (Direct standalone prompt without wrapping)
     console.log(`[genericTemplateHandler] Using unwrapped standalone prompt style`);
     const systemPrompt = templatePrompt;
-    const briefPrompt = `1. {product_description}: ${prompt}`;
+    let briefPrompt = `1. {product_description}: ${prompt}`;
+    
+    if (requestType === "FREE_STORY") {
+      const duration = existingJob?.duration_seconds || existingJob?.duration || 20;
+      briefPrompt += `\n2. {video_duration}: Buat script untuk durasi video tepat ${duration} detik.`;
+      if (existingJob?.story_type) {
+        briefPrompt += `\n3. {visual_style}: Gunakan gaya visual "${existingJob.story_type}".`;
+      }
+    }
+    
     const userPrompt = `## PRODUCT BRIEF\n${briefPrompt}`;
 
-    // 3. Call LLM
-    console.log(`[genericTemplateHandler] [LLM] Calling LLM API for request type: ${requestType}`);
-    const aiResponse = await callOpenAILLM(systemPrompt, userPrompt);
+    // 3. Sign currentS3ImageUrls to pass to LLM
+    const signedImageUrls = [];
+    if (Array.isArray(currentS3ImageUrls)) {
+      for (const urlOrKey of currentS3ImageUrls) {
+        if (urlOrKey && typeof urlOrKey === "string" && urlOrKey.trim() !== "") {
+          try {
+            let key = urlOrKey;
+            if (urlOrKey.startsWith("http://") || urlOrKey.startsWith("https://")) {
+              const parsed = new URL(urlOrKey);
+              const host = parsed.hostname;
+              if (host.includes(".s3.")) {
+                key = decodeURIComponent(parsed.pathname.substring(1));
+              } else if (host === "s3.amazonaws.com" || host.startsWith("s3-") || host.startsWith("s3.")) {
+                const parts = parsed.pathname.substring(1).split("/");
+                key = decodeURIComponent(parts.slice(1).join("/"));
+              }
+            }
+            const { GetObjectCommand } = require("@aws-sdk/client-s3");
+            const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+            const cmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key });
+            const signed = await getSignedUrl(s3, cmd, { expiresIn: 3600 });
+            signedImageUrls.push(signed);
+          } catch (signErr) {
+            console.error(`[genericTemplateHandler] Failed to sign image URL/key: ${urlOrKey}`, signErr.message);
+          }
+        }
+      }
+    }
+
+    // 4. Call LLM
+    console.log(`[genericTemplateHandler] [LLM] Calling LLM API for request type: ${requestType} with ${signedImageUrls.length} images`);
+    let llmOptions = {};
+    if (requestType === "FREE_STORY") {
+      llmOptions.requireImage = false;
+      llmOptions.injectProductInstruction = false;
+    }
+    const aiResponse = await callOpenAILLM(systemPrompt, userPrompt, signedImageUrls, llmOptions);
 
     // 4. Parse response
     const llmResponse = parseStandardLlmResponse(aiResponse);

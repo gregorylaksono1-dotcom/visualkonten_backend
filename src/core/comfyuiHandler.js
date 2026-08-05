@@ -57,7 +57,7 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
     const outputPath = path.join(tmpDir, `output_${job.uuid}.mp4`);
 
     const ffmpegCmd = await ensureFfmpegBinary();
-    const cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy ${outputPath}`;
+    const cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy -movflags +faststart ${outputPath}`;
     console.log(`[FFmpeg Merge] Running command: ${cmd}`);
     
     await new Promise((resolve, reject) => {

@@ -193,6 +193,51 @@ exports.handler = async (event) => {
       }
     }
 
+    // 2. Fetch recent FAILED jobs for automatic Redrive
+    try {
+      const { SFNClient, DescribeExecutionCommand, RedriveExecutionCommand } = require("@aws-sdk/client-sfn");
+      const sfnClient = new SFNClient({ region: REGION });
+      const oneDayAgo = getJakartaISOString(new Date(Date.now() - 24 * 60 * 60 * 1000));
+      
+      const failedRes = await dynamo.send(new QueryCommand({
+        TableName: USER_REQUEST_TABLE,
+        IndexName: STATUS_INDEX,
+        KeyConditionExpression: "#s = :s AND created_at >= :recent",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":s": "FAILED", ":recent": oneDayAgo },
+      }));
+      
+      const failedJobs = failedRes.Items || [];
+      if (failedJobs.length > 0) {
+        console.log(`[Recovery Cron] Found ${failedJobs.length} jobs in FAILED state (recent 24h).`);
+      }
+      
+      for (const fJob of failedJobs) {
+        if (!fJob.sfn_execution_arn) continue;
+        
+        try {
+          const desc = await sfnClient.send(new DescribeExecutionCommand({
+            executionArn: fJob.sfn_execution_arn
+          }));
+          
+          if (desc.redriveStatus === "REDRIVABLE" && (desc.redriveCount || 0) < 2) {
+            console.log(`[Recovery Cron] Triggering Redrive for job ${fJob.uuid} (Execution: ${fJob.sfn_execution_arn})`);
+            await sfnClient.send(new RedriveExecutionCommand({
+              executionArn: fJob.sfn_execution_arn
+            }));
+            
+            await updateDynamoStatus(fJob.uuid, fJob.user_email, "PROCESSING", {
+              error_message: `Auto-redriving execution (attempt ${(desc.redriveCount || 0) + 1})...`
+            });
+          }
+        } catch (fErr) {
+          console.error(`[Recovery Cron] Failed to check/redrive job ${fJob.uuid}:`, fErr.message);
+        }
+      }
+    } catch (failedQueryErr) {
+      console.error("[Recovery Cron] Error querying FAILED jobs:", failedQueryErr.message);
+    }
+
     console.log("[Recovery Cron] Finished successfully");
     return { statusCode: 200, body: "Success" };
   } catch (err) {

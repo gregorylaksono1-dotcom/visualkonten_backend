@@ -318,7 +318,7 @@ const getFalAiKey = async () => {
 
 const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options = {}) => {
   console.log("Starting Kie.ai Gemini 3.1 Pro call...");
-  
+
   const requireImage = options.requireImage !== undefined ? options.requireImage : true;
   const injectProductInstruction = options.injectProductInstruction !== undefined ? options.injectProductInstruction : true;
 
@@ -374,7 +374,7 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
     }
 
     const json = await response.json();
-    
+
     if (json.error) {
       console.error("Kie.ai returned an error object:", JSON.stringify(json.error));
       throw new Error(`Kie.ai API Error: ${json.error.message || JSON.stringify(json.error)}`);
@@ -619,15 +619,15 @@ const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false) =
   if (!creditAmount) return;
   const updates = [];
   const expressionAttributeValues = { ":c": Number(creditAmount), ":z": 0 };
-  
+
   if (isFreeTrialUsed) {
     updates.push("free_trial = if_not_exists(free_trial, :z) + :one");
     expressionAttributeValues[":one"] = 1;
   }
-  
+
   updates.push("credit_balance = if_not_exists(credit_balance, :z) + :c");
   updates.push("credit_usage = if_not_exists(credit_usage, :z) - :c");
-  
+
   try {
     await docClient.send(new UpdateCommand({
       TableName: PROFILE_TABLE_NAME,

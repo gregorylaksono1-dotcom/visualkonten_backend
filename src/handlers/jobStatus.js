@@ -58,6 +58,8 @@ exports.handleBatchStatus = async (event) => {
                 aspect_ratio: item.aspect_ratio ?? null,
                 generated_scenes: item.generated_scenes ?? null,
                 error_message: item.error_message ?? null,
+                duration_seconds: item.duration_seconds ?? null,
+                story_type: item.story_type ?? null,
                 preview_duration: item.preview_duration ?? null,
                 video_generation_duration: item.video_generation_duration ?? null,
                 rating: item.rating ?? null,
@@ -66,26 +68,10 @@ exports.handleBatchStatus = async (event) => {
                 generated_image: item.generated_image || null
             };
             
-            // Sanitize llm_response to hide prompts
+            // Sanitize llm_response to hide prompts if needed, but for now we keep them to display on the frontend
             if (item.llm_response) {
                 const sanitizedLlm = JSON.parse(JSON.stringify(item.llm_response));
-                const sanitizeScenes = (scenes) => {
-                    if (!Array.isArray(scenes)) return;
-                    scenes.forEach(s => {
-                        delete s.image_prompt;
-                        delete s.prompt_image;
-                        delete s.ltx_prompt;
-                        delete s.motion_prompt;
-                        delete s.video_prompt;
-                        delete s.negative_prompt;
-                        delete s.negative_image_prompt;
-                        delete s.prompt;
-                    });
-                };
-                sanitizeScenes(sanitizedLlm.scene);
-                sanitizeScenes(sanitizedLlm.scenes);
-                
-                // Remove top-level locks or other internals if needed, but they might be useful.
+                // We no longer delete the prompts because the user wants to see them on the preview page.
                 // At least prompts are stripped.
                 delete sanitizedLlm.system_prompt;
                 delete sanitizedLlm.raw_prompt;

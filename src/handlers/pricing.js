@@ -16,7 +16,8 @@ exports.handleGetPricing = async (event, pricingKeyParam) => {
       attr: resolved.item.attr,
       description: resolved.item.description || null,
       sample: resolved.item.sample,
-      coming_soon: resolved.item.coming_soon === true || resolved.item.coming_soon === "true"
+      coming_soon: resolved.item.coming_soon === true || resolved.item.coming_soon === "true",
+      durasi: resolved.item.durasi
     },
   });
 };
@@ -51,6 +52,7 @@ exports.handleListPricing = async (event) => {
         popularity: item.popularity !== undefined ? Number(item.popularity) : 0,
         coming_soon: item.coming_soon === true || item.coming_soon === "true",
         type: item.type,
+        durasi: item.durasi,
       };
     });
     return response(200, { data: formatted });

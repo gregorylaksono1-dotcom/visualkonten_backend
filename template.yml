@@ -48,7 +48,7 @@ Parameters:
   FrontendCallbackUrl:
     Type: String
     Description: Frontend callback URL sesudah login Cognito
-    Default: http://localhost:3000/generasi-video
+    Default: http://localhost:3000/dashboard
   FrontendLogoutUrl:
     Type: String
     Description: Frontend URL sesudah logout Cognito

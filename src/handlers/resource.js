@@ -105,14 +105,26 @@ exports.handlePostResource = async (event) => {
           parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
         } catch (e) { }
         if (parsedAttr) {
-          if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-            finalAmount = Number(parsedAttr["freetrial"]);
-            isFreeTrialUsed = true;
+          if (requestTypeUpper === "FREE_STORY" || requestTypeUpper === "MOTION_CONTROL") {
+            const dur = String(requestItem.duration_seconds || requestItem.duration || (requestTypeUpper === "MOTION_CONTROL" ? 10 : 20));
+            let durAttr = parsedAttr[dur];
+            if (isFreeTrial && parsedAttr.freetrial !== undefined) {
+              durAttr = parsedAttr.freetrial;
+              isFreeTrialUsed = true;
+            }
+            if (durAttr !== undefined) {
+              finalAmount = typeof durAttr === 'object' ? Number(durAttr.price || 0) : Number(durAttr);
+            }
           } else {
-            const qNum = videoQuality.replace("p", "");
-            const attrKey = `${qNum}`;
-            if (parsedAttr[attrKey] !== undefined) {
-              finalAmount = Number(parsedAttr[attrKey]);
+            if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+              finalAmount = Number(parsedAttr["freetrial"]);
+              isFreeTrialUsed = true;
+            } else {
+              const qNum = videoQuality.replace("p", "");
+              const attrKey = `${qNum}`;
+              if (parsedAttr[attrKey] !== undefined) {
+                finalAmount = Number(parsedAttr[attrKey]);
+              }
             }
           }
         }
@@ -291,7 +303,10 @@ exports.handlePostResource = async (event) => {
   }
 
   if (isPreview) {
-    pricingKey = "PREVIEW";
+    const rTypeUpper = String(requestType || "").toUpperCase();
+    if (rTypeUpper !== "FREE_STORY" && rTypeUpper !== "MOTION_CONTROL") {
+      pricingKey = "PREVIEW";
+    }
   }
 
   if (!prompt && requestType === "MOTION_CONTROL") {
@@ -335,17 +350,30 @@ exports.handlePostResource = async (event) => {
     const chosenDur = String(body.duration_seconds || body.duration || (requestTypeUpperVal === "MOTION_CONTROL" ? 10 : 20));
     
     if (parsedAttr) {
-      if (!isPreview && isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-        finalAmount = Number(parsedAttr["freetrial"]);
-        isFreeTrialUsed = true;
+      const freeTrialVal = parsedAttr["freetrial"];
+      const normalVal = parsedAttr[chosenDur];
+
+      if (isFreeTrial && freeTrialVal !== undefined) {
+        if (typeof freeTrialVal === 'object') {
+          finalAmount = isPreview ? Number(freeTrialVal.preview || 0) : Number(freeTrialVal.price || 0);
+        } else {
+          finalAmount = Number(freeTrialVal);
+        }
+        if (!isPreview) {
+          isFreeTrialUsed = true;
+        }
       } else {
-        if (parsedAttr[chosenDur] === undefined) {
+        if (normalVal === undefined) {
           return response(400, {
             error: "Kredit dan durasi tidak sesuai",
             error_code: "INVALID_DURATION_PRICING"
           });
         }
-        finalAmount = Number(parsedAttr[chosenDur]);
+        if (typeof normalVal === 'object') {
+          finalAmount = isPreview ? Number(normalVal.preview || 0) : Number(normalVal.price || 0);
+        } else {
+          finalAmount = Number(normalVal);
+        }
       }
     }
 
@@ -432,6 +460,7 @@ exports.handlePostResource = async (event) => {
     ugc_mode: body.ugc_mode || null,
     store_type: body.store_type || null,
     story_type: body.story_type || null,
+    duration_seconds: body.duration_seconds || body.duration || null,
     free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
     preview: isPreview ? 1 : 0,
     video_gen_start_at: isPreview ? null : now,

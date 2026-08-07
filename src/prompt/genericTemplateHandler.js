@@ -155,14 +155,32 @@ async function handleGenericTemplate(params) {
 
     // 2. Build system and user prompts (Direct standalone prompt without wrapping)
     console.log(`[genericTemplateHandler] Using unwrapped standalone prompt style`);
-    const systemPrompt = templatePrompt;
+    let systemPrompt = templatePrompt;
     let briefPrompt = `1. {product_description}: ${prompt}`;
     
     if (requestType === "FREE_STORY") {
+      try {
+        const guardUrl = "https://gambr-public.s3.ap-southeast-1.amazonaws.com/prompt/story_guard.md";
+        console.log(`[genericTemplateHandler] Fetching guard rules for FREE_STORY from ${guardUrl}`);
+        const guardRules = await fetchS3Text(guardUrl);
+        if (guardRules) {
+          systemPrompt = `${guardRules}\n\n---\n\n${systemPrompt}`;
+          console.log(`[genericTemplateHandler] Successfully prepended guard rules for FREE_STORY.`);
+        }
+      } catch (guardErr) {
+        console.warn(`[genericTemplateHandler] Failed to load FREE_STORY guard rules:`, guardErr.message);
+      }
+
       const duration = existingJob?.duration_seconds || existingJob?.duration || 20;
       briefPrompt += `\n2. {video_duration}: Buat script untuk durasi video tepat ${duration} detik.`;
       if (existingJob?.story_type) {
-        briefPrompt += `\n3. {visual_style}: Gunakan gaya visual "${existingJob.story_type}".`;
+        let styleInstruction = existingJob.story_type;
+        if (styleInstruction.toLowerCase() === "real") {
+          styleInstruction = "Realisme, Live-action, fotorealistik, sinematik, dunia nyata (DILARANG menggunakan gaya animasi/kartun 3D)";
+        } else if (styleInstruction.toLowerCase() === "animasi") {
+          styleInstruction = "Animasi 3D, gaya Pixar/Disney, penuh warna, kartun 3D yang ekspresif";
+        }
+        briefPrompt += `\n3. {visual_style}: WAJIB aplikasikan gaya visual "${styleInstruction}" pada deskripsi prompt secara konsisten di semua scene.`;
       }
     }
     
@@ -218,11 +236,13 @@ async function handleGenericTemplate(params) {
     if (Array.isArray(scenes)) {
       llmResponse.scenes = scenes.map(s => {
         const ltx_prompt = s.ltx_prompt || s.video_prompt || s.image_prompt || s.prompt_video || s.prompt_image || "";
+        const image_prompt = s.image_prompt || s.prompt_image || ltx_prompt;
         const ltx_negative_prompt = s.ltx_negative_prompt || s.negative_video_prompt || s.negative_image_prompt || s.negative_prompt || "";
         const duration_seconds = Number(s.duration_seconds || s.duration || s.duration_sec || 4);
         return {
           ...s,
           ltx_prompt,
+          image_prompt,
           ltx_negative_prompt,
           duration_seconds
         };

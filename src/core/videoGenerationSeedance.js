@@ -79,7 +79,7 @@ async function generateSeedanceVideo(params) {
       prompt: motionPrompt,
       input_urls: [kieImageUrl],
       aspect_ratio: resolvedAspectRatio,
-      resolution: "720p",
+      resolution: video_quality === "480p" ? "480p" : "720p",
       duration: resolvedDuration,
       generate_audio: false
     };

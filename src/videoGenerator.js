@@ -281,40 +281,45 @@ const handleSubmission = async (event) => {
   const isTemplateDriven = Boolean(templatePrompt);
 
   if (isTemplateDriven) {
-    console.log(`[Worker] Generating dynamic LLM response for job ${jobId} (Type: ${requestType})`);
-    try {
-      const { handleGenericTemplate } = require("./prompt/genericTemplateHandler");
-      const llmResponse = await handleGenericTemplate({
-        jobId,
-        userEmail,
-        userId: event.userId,
-        currentS3ImageUrls,
-        prompt,
-        videoQuality,
-        aspectRatio,
-        S3_RESOURCE_BUCKET,
-        dynamo,
-        s3: s3Client,
-        USER_REQUEST_TABLE,
-        preview: preview || false,
-        existingJob,
-        requestType,
-        template: templatePrompt
-      });
-      existingJob.llm_response = llmResponse;
-      console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}. Proceeding to state machine.`);
-    } catch (err) {
-      console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
-      
-      if (existingJob.credit_amount) {
-        const { refundUserCredit } = require("./services");
-        const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
-        await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
+    if (!existingJob.llm_response) {
+      console.log(`[Worker] Generating dynamic LLM response for job ${jobId} (Type: ${requestType})`);
+      try {
+        const { handleGenericTemplate } = require("./prompt/genericTemplateHandler");
+        const llmResponse = await handleGenericTemplate({
+          jobId,
+          userEmail,
+          userId: event.userId,
+          currentS3ImageUrls,
+          prompt,
+          videoQuality,
+          aspectRatio,
+          S3_RESOURCE_BUCKET,
+          dynamo,
+          s3: s3Client,
+          USER_REQUEST_TABLE,
+          preview: preview || false,
+          existingJob,
+          requestType,
+          template: templatePrompt
+        });
+        existingJob.llm_response = llmResponse;
+        console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}. Proceeding to state machine.`);
+      } catch (err) {
+        console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
+        await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+        
+        if (existingJob.credit_amount) {
+          const { refundUserCredit } = require("./services");
+          const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
+          await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
+        }
+        return;
       }
-      return;
+    } else {
+      console.log(`[Worker] Reusing existing llm_response for job ${jobId} (Type: ${requestType})`);
     }
   }
+
 
   const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || isTemplateDriven;
   const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
@@ -409,6 +414,23 @@ const handleSubmission = async (event) => {
         finalJobPrompt = llmResponse.ltx_prompt || JSON.stringify(llmResponse);
       }
 
+      if (llmResponse && (llmResponse.status === "error" || llmResponse.error === true || llmResponse.error === "true")) {
+        const reason = llmResponse.reason || "Permintaan tidak valid atau melanggar kebijakan.";
+        console.log(`[Worker] LLM rejected the prompt for job ${jobId}. Reason: ${reason}`);
+        await updateDynamoStatus(jobId, userEmail, "ERROR_LLM", { 
+          error_message: reason,
+          llm_reason: reason
+        });
+
+        if (existingJob.credit_amount) {
+          const { refundUserCredit } = require("./services");
+          const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
+          await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
+        }
+        await sendTelegramMessage(`${userEmail} error_llm ${reason}`).catch(console.error);
+        return;
+      }
+
       if (preview) {
         console.log(`[Worker] Running in Preview mode. Generating all scene and talent images...`);
         const { generatePreviewAssets } = require("./core/previewImageHelper");
@@ -431,27 +453,8 @@ const handleSubmission = async (event) => {
         return;
       }
 
-
-
       if (llmResponse) {
         try {
-          if (llmResponse.status === "error") {
-            const reason = llmResponse.reason || "Permintaan tidak valid, masukkan deskripsi produk yang benar.";
-            console.log(`[Worker] LLM rejected the prompt for job ${jobId}. Reason: ${reason}`);
-            await updateDynamoStatus(jobId, userEmail, "ERROR_LLM", { 
-              error_message: reason,
-              llm_reason: reason
-            });
-
-            if (existingJob.credit_amount) {
-              const { refundUserCredit } = require("./services");
-              const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
-              await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
-            }
-            await sendTelegramMessage(`${userEmail} error_llm ${reason}`).catch(console.error);
-            return;
-          }
-
           console.log(`[Worker] Starting KIE.ai Step Function for job ${jobId}`);
           await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
           const { triggerStateMachine } = require("./core/sfnOrchestrator");

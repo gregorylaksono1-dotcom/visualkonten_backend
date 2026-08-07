@@ -266,6 +266,7 @@ async function processFreeTrialJob(params) {
         finalJobPrompt: job.prompt,
         videoQuality: job.video_quality || "720p",
         aspectRatio: job.aspect_ratio || "9:16",
+        generationMode: job.preview === true ? "preview" : "full",
         S3_RESOURCE_BUCKET,
         dynamo,
         s3,

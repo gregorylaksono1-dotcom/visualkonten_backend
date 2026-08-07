@@ -254,8 +254,14 @@ async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, ref
   const hasImages = Array.isArray(referenceUrls) && referenceUrls.length > 0;
   
   const model = "nano-banana-2-lite";
+  let finalPrompt = prompt || "";
+  const negPromptStr = String(negativePrompt || "").trim();
+  if (negPromptStr) {
+    finalPrompt = `${finalPrompt.trim()}. Avoid: ${negPromptStr}.`;
+  }
+
   const input = {
-    prompt,
+    prompt: finalPrompt,
     aspect_ratio: resolvedAspectRatio
   };
 

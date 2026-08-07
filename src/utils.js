@@ -80,7 +80,7 @@ const extFromContentType = (ct) => {
   return "jpg";
 };
 
-const ALLOWED_VIDEO_QUALITY = new Set(["720p", "1080p"]);
+const ALLOWED_VIDEO_QUALITY = new Set(["480p", "720p", "1080p"]);
 const ALLOWED_ASPECT_RATIO = new Set(["9:16", "16:9", "1:1"]);
 
 const normalizeVideoQuality = (raw) => {

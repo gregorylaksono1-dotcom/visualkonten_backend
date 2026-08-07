@@ -123,6 +123,17 @@ async function prepareJobData(payload) {
 
   console.log(`[SFN Orchestrator] Preparing job data for ${jobId}`);
 
+  let generated_scenes = [];
+  try {
+    const dbResult = await dynamo.send(new GetCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail }
+    }));
+    generated_scenes = dbResult.Item?.generated_scenes || [];
+  } catch (err) {
+    console.error(`[SFN Orchestrator] Failed to fetch existing job for ${jobId}`, err);
+  }
+
   // 1. Build locks
   const locks = [];
   const currentUrls = Array.isArray(currentS3ImageUrls) ? currentS3ImageUrls : [];
@@ -221,6 +232,9 @@ async function prepareJobData(payload) {
   const scenes = rawScenes.map((s, i) => {
     const sceneId = s.scene_id || (i + 1);
     const dependency = Array.isArray(s.dependency) ? s.dependency : locks.map(l => l.id);
+    const existingGeneratedScene = generated_scenes.find(gs => String(gs.scene_id) === String(sceneId));
+    const s3key = existingGeneratedScene && existingGeneratedScene.s3_key ? existingGeneratedScene.s3_key : "";
+
     return {
       scene_id: sceneId,
       prompt_image: s.image_prompt === null ? null : (s.image_prompt || s.prompt || finalJobPrompt),
@@ -229,7 +243,8 @@ async function prepareJobData(payload) {
       dependency: dependency,
       video_prompt: s.video_prompt || s.ltx_prompt || s.motion_prompt || "Cinematic panning shot.",
       continuity: s.continuity || null,
-      isImageFinished: false,
+      isImageFinished: !!s3key,
+      s3key: s3key,
       isVideoSceneFinished: false,
       imageTaskId: "",
       videoTaskId: "",
@@ -246,6 +261,7 @@ async function prepareJobData(payload) {
       dependency: [],
       video_prompt: finalJobPrompt,
       isImageFinished: false,
+      s3key: "",
       isVideoSceneFinished: false,
       imageTaskId: "",
       videoTaskId: "",
@@ -333,6 +349,16 @@ async function submitSceneImage(payload) {
 
   console.log(`[SFN Orchestrator] submitSceneImage for jobId ${jobId}, scene id ${scene.scene_id}`);
   await saveTaskToken(jobId, userEmail, `image_${scene.scene_id}`, taskToken);
+
+  if (scene.isImageFinished && scene.s3key) {
+    console.log(`[SFN Orchestrator] Scene ${scene.scene_id} already has image (${scene.s3key}). Skipping image generation.`);
+    const { SendTaskSuccessCommand } = require("@aws-sdk/client-sfn");
+    await sfnClient.send(new SendTaskSuccessCommand({
+      taskToken,
+      output: JSON.stringify({ id: scene.scene_id, s3key: scene.s3key })
+    }));
+    return;
+  }
 
   if (scene.continuity === "chain_from_previous" && scene.prompt_image === null) {
     console.log(`[SFN Orchestrator] Scene ${scene.scene_id} has continuity: chain_from_previous and prompt_image is null. Skipping image generation.`);

@@ -79,12 +79,32 @@ exports.handleBatchStatus = async (event) => {
                 out.llm_response = sanitizedLlm;
             }
 
+            // Helper to extract key
+            const extractS3Key = (urlOrKey) => {
+                if (!urlOrKey) return "";
+                const trimmed = urlOrKey.trim();
+                if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                    try {
+                        const parsed = new URL(trimmed);
+                        const host = parsed.hostname;
+                        if (host.includes(".s3.")) {
+                            return decodeURIComponent(parsed.pathname.substring(1));
+                        } else if (host === "s3.amazonaws.com" || host.startsWith("s3-") || host.startsWith("s3.")) {
+                            const parts = parsed.pathname.substring(1).split("/");
+                            return decodeURIComponent(parts.slice(1).join("/"));
+                        }
+                    } catch (e) {}
+                }
+                return decodeURIComponent(trimmed);
+            };
+
             // Sign Thumbnail (Flux Image)
             if (item.generated_image) {
                 try {
+                    const key = extractS3Key(item.generated_image);
                     out.thumbnail_url = await getSignedUrl(s3Client, new GetObjectCommand({
                         Bucket: S3_RESOURCE_BUCKET,
-                        Key: item.generated_image
+                        Key: key
                     }), { expiresIn: 3600 });
                 } catch (e) {
                     console.error(`Error signing thumbnail for ${item.uuid}`, e);
@@ -94,9 +114,10 @@ exports.handleBatchStatus = async (event) => {
             // Sign Result (Video or Final Image)
             if (item.result_url && item.status === "COMPLETED") {
                 try {
+                    const key = extractS3Key(item.result_url);
                     out.result_url = await getSignedUrl(s3Client, new GetObjectCommand({
                         Bucket: S3_RESOURCE_BUCKET,
-                        Key: item.result_url
+                        Key: key
                     }), { expiresIn: 3600 });
                 } catch (e) {
                     console.error(`Error signing result for ${item.uuid}`, e);

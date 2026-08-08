@@ -80,7 +80,7 @@ const extFromContentType = (ct) => {
   return "jpg";
 };
 
-const ALLOWED_VIDEO_QUALITY = new Set(["480p", "720p", "1080p"]);
+const ALLOWED_VIDEO_QUALITY = new Set(["720p", "1080p"]);
 const ALLOWED_ASPECT_RATIO = new Set(["9:16", "16:9", "1:1"]);
 
 const normalizeVideoQuality = (raw) => {
@@ -109,8 +109,7 @@ const parseCreditsFromPricingItem = (item) => {
       parsedAttr = typeof item.attr === "string" ? JSON.parse(item.attr) : item.attr;
     } catch (e) { }
     if (parsedAttr && parsedAttr["720"] !== undefined) {
-      const v = parsedAttr["720"];
-      raw = typeof v === 'object' && v !== null ? (v.price || 0) : v;
+      raw = parsedAttr["720"];
     }
   }
 

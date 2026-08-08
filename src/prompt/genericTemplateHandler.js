@@ -182,6 +182,18 @@ async function handleGenericTemplate(params) {
         }
         briefPrompt += `\n3. {visual_style}: WAJIB aplikasikan gaya visual "${styleInstruction}" pada deskripsi prompt secara konsisten di semua scene.`;
       }
+    } else {
+      try {
+        const guardUrl = "https://gambr-public.s3.ap-southeast-1.amazonaws.com/prompt/ad_input_guard.md";
+        console.log(`[genericTemplateHandler] Fetching guard rules for AD (${requestType}) from ${guardUrl}`);
+        const guardRules = await fetchS3Text(guardUrl);
+        if (guardRules) {
+          systemPrompt = `${guardRules}\n\n---\n\n${systemPrompt}`;
+          console.log(`[genericTemplateHandler] Successfully prepended guard rules for AD (${requestType}).`);
+        }
+      } catch (guardErr) {
+        console.warn(`[genericTemplateHandler] Failed to load AD guard rules for ${requestType}:`, guardErr.message);
+      }
     }
     
     const userPrompt = `## PRODUCT BRIEF\n${briefPrompt}`;

@@ -116,15 +116,16 @@ exports.handlePostResource = async (event) => {
               finalAmount = typeof durAttr === 'object' ? Number(durAttr.price || 0) : Number(durAttr);
             }
           } else {
+            let valToUse;
             if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-              finalAmount = Number(parsedAttr["freetrial"]);
+              valToUse = parsedAttr["freetrial"];
               isFreeTrialUsed = true;
             } else {
               const qNum = videoQuality.replace("p", "");
-              const attrKey = `${qNum}`;
-              if (parsedAttr[attrKey] !== undefined) {
-                finalAmount = Number(parsedAttr[attrKey]);
-              }
+              valToUse = parsedAttr[`${qNum}`];
+            }
+            if (valToUse !== undefined) {
+              finalAmount = typeof valToUse === 'object' ? Number(valToUse.price || 0) : Number(valToUse);
             }
           }
         }
@@ -262,9 +263,13 @@ exports.handlePostResource = async (event) => {
   const hasImage = Boolean(imageBase64_1.trim() || imageBase64_2.trim());
   const resourceFamily = String(body.resource_family || "image").toLowerCase() === "video" ? "video" : "image";
   const isFreeTrialRequested = body.free_trial === true || String(body.free_trial).toLowerCase() === "true" || body.request_type === "FREE-TRIAL";
-  const isPreview = body.preview === true || String(body.preview).toLowerCase() === "true";
-
+  let isPreview = body.preview === true || String(body.preview).toLowerCase() === "true";
   let requestType = body.request_type;
+
+  if (requestType === "MOTION_CONTROL") {
+    isPreview = false;
+  }
+
   let pricingKey;
 
   const videoQuality = normalizeVideoQuality(body.video_quality);
@@ -304,9 +309,9 @@ exports.handlePostResource = async (event) => {
 
   if (isPreview) {
     const rTypeUpper = String(requestType || "").toUpperCase();
-    if (rTypeUpper !== "FREE_STORY" && rTypeUpper !== "MOTION_CONTROL") {
-      pricingKey = "PREVIEW";
-    }
+    // No longer override pricingKey to "PREVIEW" here, we want the template's normal pricing row 
+    // to determine if preview has a cost (like FREE_STORY has a 3 credit preview price), 
+    // or default to 0 if not specified.
   }
 
   if (!prompt && requestType === "MOTION_CONTROL") {
@@ -383,17 +388,29 @@ exports.handlePostResource = async (event) => {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
     } catch (e) { }
     if (parsedAttr) {
-      if (!isPreview && isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-        finalAmount = Number(parsedAttr["freetrial"]);
-        isFreeTrialUsed = true;
+      let valToUse;
+      if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+        valToUse = parsedAttr["freetrial"];
+        if (!isPreview) isFreeTrialUsed = true;
       } else {
         const qNum = videoQuality.replace("p", "");
-        const attrKey = `${qNum}`;
-        if (parsedAttr[attrKey] !== undefined) {
-          finalAmount = Number(parsedAttr[attrKey]);
-        }
+        valToUse = parsedAttr[`${qNum}`];
       }
+      
+      if (valToUse !== undefined) {
+        if (typeof valToUse === 'object') {
+          finalAmount = isPreview ? Number(valToUse.preview || 0) : Number(valToUse.price || 0);
+        } else {
+          finalAmount = isPreview ? 0 : Number(valToUse);
+        }
+      } else if (isPreview) {
+        finalAmount = 0;
+      }
+    } else if (isPreview) {
+      finalAmount = 0;
     }
+  } else if (isPreview) {
+    finalAmount = 0;
   }
 
   const requestId = randomUUID();

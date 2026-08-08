@@ -449,7 +449,7 @@ const handleSubmission = async (event) => {
           requestType,
           startTime: submissionStartTime
         });
-        await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
+        await sendTelegramMessage(`user "${userEmail}" melakukan generasi preview ${requestType}`).catch(console.error);
         return;
       }
 

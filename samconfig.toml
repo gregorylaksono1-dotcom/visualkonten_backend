@@ -61,8 +61,8 @@ FreeTrialBackend="comfyui" \
 Runpod="false" \
 generationManual="false" \
 RemotionAwsRegion="ap-southeast-1" \
-RemotionFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
-RemotionServeUrl="https://remotionlambda-xxx.s3.ap-southeast-1.amazonaws.com/sites/post-production-site/index.html" \
+RemotionMotionGraphicsFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
+RemotionMotionGraphicsServeUrl="https://remotionlambda-xxx.s3.ap-southeast-1.amazonaws.com/sites/motion-graphics-site/index.html" \
 """
 
 [production.deploy.parameters]
@@ -99,4 +99,6 @@ generationManual="false" \
 RemotionAwsRegion="ap-southeast-1" \
 RemotionFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
 RemotionServeUrl="https://remotionlambda-apsoutheast1-ogp034gdv6.s3.ap-southeast-1.amazonaws.com/sites/post-production-site/index.html" \
+RemotionMotionGraphicsFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
+RemotionMotionGraphicsServeUrl="https://remotionlambda-apsoutheast1-v6x49j2vt5.s3.ap-southeast-1.amazonaws.com/sites/motion-graphics-site/index.html" \
 """

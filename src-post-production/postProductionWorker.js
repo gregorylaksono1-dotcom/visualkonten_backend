@@ -42,12 +42,19 @@ exports.handler = async (event, context) => {
     }
 
     let finalVideoUrl = videoUrl;
+    if (!finalVideoUrl.startsWith("http") && !finalVideoUrl.startsWith("s3://")) {
+      const bucket = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+      const region = process.env.AWS_REGION || "ap-southeast-1";
+      finalVideoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${finalVideoUrl}`;
+      console.log(`[PostProductionWorker] Converted S3 key to URL: ${finalVideoUrl}`);
+    }
+
     let isS3 = false;
     let bucketName, s3Region, key;
 
     // Detect if videoUrl is an S3 URL (HTTPS or s3:// format)
-    const httpsMatch = videoUrl.match(/^https:\/\/([^.]+)\.s3\.([^.]+)\.amazonaws\.com\/(.+)$/);
-    const s3ProtocolMatch = videoUrl.match(/^s3:\/\/([^/]+)\/(.+)$/);
+    const httpsMatch = finalVideoUrl.match(/^https:\/\/([^.]+)\.s3\.([^.]+)\.amazonaws\.com\/(.+)$/);
+    const s3ProtocolMatch = finalVideoUrl.match(/^s3:\/\/([^/]+)\/(.+)$/);
 
     if (httpsMatch || s3ProtocolMatch) {
       isS3 = true;

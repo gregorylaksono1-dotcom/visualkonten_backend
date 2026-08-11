@@ -40,6 +40,7 @@ const PROFILE_TABLE_NAME = process.env.PROFILE_TABLE_NAME;
 const USER_REQUEST_TABLE_NAME = process.env.USER_REQUEST_TABLE_NAME;
 const COMFYUI_FUNCTION_NAME = process.env.COMFYUI_FUNCTION_NAME;
 const FREE_TRIAL_FUNCTION_NAME = process.env.FREE_TRIAL_FUNCTION_NAME;
+const MOTION_GRAPHICS_FUNCTION_NAME = process.env.MOTION_GRAPHICS_FUNCTION_NAME;
 const MIDTRANS_API_URL = process.env.MIDTRANS_API_URL;
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const S3_RESOURCE_BUCKET = bucketName;
@@ -87,7 +88,6 @@ const invokeFreeTrialWorker = async (jobId, jobDetail) => {
     );
   } catch (err) {
     console.error("invokeFreeTrialWorker error:", err.message);
-    throw err;
   }
 };
 
@@ -111,6 +111,7 @@ const invokeComfyUI = async (jobId, jobDetail) => {
     userEmail: jobDetail.userEmail || jobDetail.user_email,
     userId: jobDetail.userId || jobDetail.user_id,
     requestType: jobDetail.requestType || jobDetail.request_type,
+    pricing_type: jobDetail.pricing_type,
     prompt: jobDetail.prompt,
     videoQuality: jobDetail.videoQuality || jobDetail.video_quality,
     aspectRatio: jobDetail.aspectRatio || jobDetail.aspect_ratio,
@@ -350,47 +351,61 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
     ];
   }
 
-  try {
-    const response = await fetch("https://api.kie.ai/gemini-3.1-pro/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: "gemini-3.1-pro",
-        messages: [
-          { role: "system", content: finalSystemPrompt },
-          { role: "user", content: userContent }
-        ],
-        temperature: 1
-      })
-    });
+  const maxRetries = 3;
+  let lastError;
 
-    if (!response.ok) {
-      const errorJson = await response.json().catch(() => ({}));
-      console.error(`Kie.ai API error: ${response.status}`, JSON.stringify(errorJson));
-      throw new Error(`Kie.ai API error: ${response.status} ${JSON.stringify(errorJson)}`);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch("https://api.kie.ai/gemini-3.1-pro/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gemini-3.1-pro",
+          messages: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: userContent }
+          ],
+          temperature: 1
+        })
+      });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        console.error(`Kie.ai API error: ${response.status}`, JSON.stringify(errorJson));
+        throw new Error(`Kie.ai API error: ${response.status} ${JSON.stringify(errorJson)}`);
+      }
+
+      const json = await response.json();
+
+      if (json.error) {
+        console.error("Kie.ai returned an error object:", JSON.stringify(json.error));
+        throw new Error(`Kie.ai API Error: ${json.error.message || JSON.stringify(json.error)}`);
+      }
+
+      if (!json || !json.choices || !json.choices[0] || !json.choices[0].message) {
+        console.error("Unexpected LLM response structure:", JSON.stringify(json));
+        throw new Error(`Invalid LLM response structure: ${JSON.stringify(json)}`);
+      }
+      
+      const content = json.choices[0].message.content.trim();
+      console.log(`Kie.ai call successful on attempt ${attempt}. Response content:`, content);
+      return content;
+    } catch (err) {
+      console.error(`[services] callOpenAILLM attempt ${attempt} failed:`, err.message);
+      lastError = err;
+      if (attempt < maxRetries) {
+        const backoffMs = attempt * 2000;
+        console.log(`Waiting ${backoffMs}ms before retry...`);
+        await new Promise(r => setTimeout(r, backoffMs));
+      }
     }
-
-    const json = await response.json();
-
-    if (json.error) {
-      console.error("Kie.ai returned an error object:", JSON.stringify(json.error));
-      throw new Error(`Kie.ai API Error: ${json.error.message || JSON.stringify(json.error)}`);
-    }
-
-    if (!json || !json.choices || !json.choices[0] || !json.choices[0].message) {
-      console.error("Unexpected LLM response structure:", JSON.stringify(json));
-      throw new Error(`Invalid LLM response structure: ${JSON.stringify(json)}`);
-    }
-    const content = json.choices[0].message.content.trim();
-    console.log("Kie.ai call successful. Response content:", content);
-    return content;
-  } catch (err) {
-    console.error("Kie.ai request failed:", err.message);
-    throw err;
   }
+
+  console.error("Kie.ai request failed after 3 attempts.");
+  throw lastError;
 };
 
 const callGeminiAudio = async (text, config) => {

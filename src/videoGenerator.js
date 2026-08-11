@@ -247,6 +247,7 @@ const handleSubmission = async (event) => {
   }
 
   // ─── Key Routing for Custom Handlers ──────────────────────────────────────────
+
   if (requestType === "MOTION_CONTROL") {
     console.log(`[Worker] Starting MOTION_CONTROL task submission for job ${jobId}`);
     try {
@@ -467,6 +468,7 @@ const handleSubmission = async (event) => {
             finalJobPrompt,
             aspectRatio,
             requestType,
+            pricing_type: event.pricing_type,
             audio: existingJob.audio,
             audio_duration: existingJob.audio_duration
           });

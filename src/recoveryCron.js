@@ -72,6 +72,23 @@ exports.handler = async (event) => {
 
     for (const job of jobs) {
       try {
+        if (job.sfn_execution_arn) {
+          const { SFNClient, DescribeExecutionCommand } = require("@aws-sdk/client-sfn");
+          const sfnClient = new SFNClient({ region: REGION });
+          try {
+            const desc = await sfnClient.send(new DescribeExecutionCommand({ executionArn: job.sfn_execution_arn }));
+            if (["FAILED", "TIMED_OUT", "ABORTED"].includes(desc.status)) {
+              console.log(`[Recovery Cron] Step Function execution ${desc.status} for job ${job.uuid}. Marking as FAILED.`);
+              await updateDynamoStatus(job.uuid, job.user_email, "FAILED", {
+                error_message: `Video generation workflow ${desc.status.toLowerCase()}.`
+              });
+              continue; // Skip the rest of the Kie.ai checks for this job
+            }
+          } catch (sfnErr) {
+            console.error(`[Recovery Cron] Failed to describe execution for job ${job.uuid}:`, sfnErr.message);
+          }
+        }
+
         // Case A: Multi-scene jobs
         if (Array.isArray(job.video_scenes) && job.video_scenes.length > 0) {
           console.log(`[Recovery Cron] Job ${job.uuid} has ${job.video_scenes.length} scenes. Checking unfinished ones...`);

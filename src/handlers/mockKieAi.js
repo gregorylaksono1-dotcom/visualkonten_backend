@@ -3,7 +3,7 @@
 const { response } = require("../utils");
 
 const KIE_MOCK_IMAGE_URL = process.env.KIE_MOCK_IMAGE_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/dumy_scene.jpeg";
-const KIE_MOCK_VIDEO_URL = process.env.KIE_MOCK_VIDEO_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/_product_jeans.mp4";
+const KIE_MOCK_VIDEO_URL = process.env.KIE_MOCK_VIDEO_URL || "https://gambr-public.s3.ap-southeast-1.amazonaws.com/sensory.mp4";
 
 exports.handleMockKieAi = async (event) => {
   const method = event.httpMethod;

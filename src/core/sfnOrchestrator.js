@@ -31,6 +31,7 @@ async function triggerStateMachine({
   finalJobPrompt,
   aspectRatio,
   requestType,
+  pricing_type,
   audio,
   audio_duration
 }) {
@@ -43,10 +44,11 @@ async function triggerStateMachine({
     userEmail,
     userId: userId || "anonymous",
     currentS3ImageUrls: Array.isArray(currentS3ImageUrls) ? currentS3ImageUrls : [],
+    requestType,
+    pricing_type: pricing_type || "",
     llmResponse,
     finalJobPrompt,
     aspectRatio: aspectRatio || "9:16",
-    requestType,
     audio: audio || null,
     audio_duration: audio_duration || null
   };

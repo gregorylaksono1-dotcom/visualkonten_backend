@@ -2,7 +2,7 @@
 
 const { SFNClient, SendTaskSuccessCommand, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
 const { S3Client, CopyObjectCommand } = require("@aws-sdk/client-s3");
-const { getJakartaISOString } = require("../utils");
+const { getJakartaISOString } = require("./utils");
 
 const sfnClient = new SFNClient({ region: process.env.AWS_REGION || "ap-southeast-1" });
 
@@ -23,15 +23,17 @@ exports.handler = async (event) => {
 
     if (type === "success") {
       let finalResultUrl = outputFile;
+      
+      const outKey = body.outKey || (body.renderId ? `renders/${body.renderId}/out.mp4` : null);
 
-      if (customData.originalBucket && customData.originalKey && body.bucketName && body.outKey) {
-        console.log(`[RemotionWebhook] Copying output from ${body.bucketName}/${body.outKey} to ${customData.originalBucket}/${customData.originalKey}`);
+      if (customData.originalBucket && customData.originalKey && body.bucketName && outKey) {
+        console.log(`[RemotionWebhook] Copying output from ${body.bucketName}/${outKey} to ${customData.originalBucket}/${customData.originalKey}`);
         try {
           const s3Client = new S3Client({ region: process.env.AWS_REGION || "ap-southeast-1" });
           await s3Client.send(new CopyObjectCommand({
             Bucket: customData.originalBucket,
             Key: customData.originalKey,
-            CopySource: `${body.bucketName}/${encodeURI(body.outKey)}`
+            CopySource: `${body.bucketName}/${encodeURI(outKey)}`
           }));
           console.log(`[RemotionWebhook] Successfully overwritten original video at ${customData.originalBucket}/${customData.originalKey}`);
           

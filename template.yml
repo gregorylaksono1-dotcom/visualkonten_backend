@@ -147,6 +147,18 @@ Parameters:
     Type: String
     Description: S3 Serve URL untuk bundle React Remotion
     Default: https://remotionlambda-xxx.s3.amazonaws.com/sites/post-production-site/index.html
+  RemotionMotionGraphicsAwsRegion:
+    Type: String
+    Description: Region untuk Remotion Motion Graphics Lambda
+    Default: ap-southeast-1
+  RemotionMotionGraphicsFunctionName:
+    Type: String
+    Description: Nama function AWS Lambda dari Remotion Motion Graphics
+    Default: remotion-render-function
+  RemotionMotionGraphicsServeUrl:
+    Type: String
+    Description: S3 Serve URL untuk bundle React Remotion Motion Graphics
+    Default: https://remotionlambda-xxx.s3.amazonaws.com/sites/motion-graphics-site/index.html
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -947,9 +959,13 @@ Resources:
         - Effect: Allow
           Action:
           - lambda:InvokeFunction
+          - states:SendTaskSuccess
+          - states:SendTaskFailure
+          - states:SendTaskHeartbeat
           Resource: "*"
       Environment:
         Variables:
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
           REMOTION_AWS_REGION: !Ref RemotionAwsRegion
           REMOTION_FUNCTION_NAME: !Ref RemotionFunctionName
           REMOTION_SERVE_URL: !Ref RemotionServeUrl
@@ -1005,6 +1021,110 @@ Resources:
               Authorizer: NONE
     Metadata:
       SamResourceId: RemotionWebhookFunction
+
+  MotionGraphicsWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: motionGraphicsWorker.handler
+      Runtime: nodejs22.x
+      Timeout: 900
+      MemorySize: 1024
+      Architectures:
+      - x86_64
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - AmazonS3FullAccess
+      - AWSLambda_FullAccess
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:InvokeFunction
+          Resource: "*"
+        - Effect: Allow
+          Action:
+          - ssm:GetParameter
+          - ssm:GetParameters
+          - ssm:GetParametersByPath
+          Resource:
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
+          - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Scan
+          - dynamodb:Query
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          Resource:
+          - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PricingTable}
+          - Fn::Sub: arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${UserRequestTable}
+      Environment:
+        Variables:
+          REMOTION_AWS_REGION: !Ref RemotionMotionGraphicsAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionMotionGraphicsServeUrl
+          WEBHOOK_URL: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/motion-graphics/webhook"
+          FORCE_DEPLOY: "1"
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          PRICING_TABLE_NAME: !Ref PricingTable
+          NODE_OPTIONS: --disable-warning=DEP0040
+    Metadata:
+      SamResourceId: MotionGraphicsWorkerFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - motionGraphicsWorker.js
+        External:
+        - "@aws-sdk/client-sfn"
+
+  MotionGraphicsWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: motionGraphicsWebhook.handler
+      Runtime: nodejs22.x
+      Timeout: 30
+      MemorySize: 256
+      Architectures:
+      - x86_64
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - DynamoDBCrudPolicy:
+          TableName: !Ref UserRequestTable
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - s3:GetObject
+          - s3:PutObject
+          - states:SendTaskSuccess
+          - states:SendTaskFailure
+          Resource:
+          - Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+          - arn:aws:s3:::remotionlambda-*
+          - "*"
+      Environment:
+        Variables:
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+      Events:
+        MotionGraphicsWebhook:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /motion-graphics/webhook
+            Method: post
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: MotionGraphicsWebhookFunction
+
   CognitoInvokePermissionForPostAuth:
     Type: AWS::Lambda::Permission
     Properties:
@@ -1139,12 +1259,15 @@ Resources:
       DefinitionSubstitutions:
         ComfyUIWorkerFunctionArn: !GetAtt ComfyUIWorkerFunction.Arn
         PostProductionFunctionArn: !GetAtt PostProductionFunction.Arn
+        MotionGraphicsWorkerFunctionArn: !GetAtt MotionGraphicsWorkerFunction.Arn
         UserRequestTableName: !Ref UserRequestTable
       Policies:
         - LambdaInvokePolicy:
             FunctionName: !Ref ComfyUIWorkerFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref PostProductionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsWorkerFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
 
@@ -1216,6 +1339,7 @@ Outputs:
 
 # check log di dev
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
+# sam logs -n PostProductionFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
 
 # check log di prod
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production

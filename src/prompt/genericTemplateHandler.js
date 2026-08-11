@@ -156,6 +156,19 @@ async function handleGenericTemplate(params) {
     // 2. Build system and user prompts (Direct standalone prompt without wrapping)
     console.log(`[genericTemplateHandler] Using unwrapped standalone prompt style`);
     let systemPrompt = templatePrompt;
+
+    try {
+      const postProductionSpecUrl = "https://gambr-public.s3.ap-southeast-1.amazonaws.com/prompt/post_production_spec.md";
+      console.log(`[genericTemplateHandler] Fetching post_production_spec from ${postProductionSpecUrl}`);
+      const postProductionSpec = await fetchS3Text(postProductionSpecUrl);
+      if (postProductionSpec) {
+        systemPrompt = `${postProductionSpec}\n\n---\n\n${systemPrompt}`;
+        console.log(`[genericTemplateHandler] Successfully prepended post_production_spec.`);
+      }
+    } catch (specErr) {
+      console.warn(`[genericTemplateHandler] Failed to load post_production_spec:`, specErr.message);
+    }
+
     let briefPrompt = `1. {product_description}: ${prompt}`;
     
     if (requestType === "FREE_STORY") {

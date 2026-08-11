@@ -21,13 +21,6 @@
           "BackoffRate": 2.0
         }
       ],
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusFailed"
-        }
-      ],
       "Next": "GenerateLockImages"
     },
 
@@ -69,13 +62,6 @@
           }
         }
       },
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusFailed"
-        }
-      ],
       "ResultPath": "$.lockResults",
       "Next": "GenerateSceneImages"
     },
@@ -120,13 +106,6 @@
           }
         }
       },
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusFailed"
-        }
-      ],
       "ResultPath": "$.sceneImageResults",
       "Next": "GenerateSceneVideos"
     },
@@ -181,13 +160,6 @@
           }
         }
       },
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusFailed"
-        }
-      ],
       "ResultPath": "$.videoSceneResults",
       "Next": "MergeVideoScenes"
     },
@@ -217,13 +189,6 @@
           "BackoffRate": 2.0
         }
       ],
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusFailed"
-        }
-      ],
       "Next": "CheckPostProduction"
     },
 
@@ -231,8 +196,8 @@
       "Type": "Choice",
       "Choices": [
         {
-          "Variable": "$.pricing_post_production",
-          "BooleanEquals": true,
+          "Variable": "$.llm_response.post_production",
+          "IsPresent": true,
           "Next": "TriggerPostProduction"
         }
       ],
@@ -262,13 +227,6 @@
           "BackoffRate": 2.0
         }
       ],
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.errorInfo",
-          "Next": "UpdateStatusPostProductionFailed"
-        }
-      ],
       "Next": "UpdateStatusCompleted"
     },
 
@@ -292,62 +250,6 @@
         }
       },
       "End": true
-    },
-
-    "UpdateStatusFailed": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::dynamodb:updateItem",
-      "Parameters": {
-        "TableName": "${UserRequestTableName}",
-        "Key": {
-          "uuid": { "S.$": "$.jobId" },
-          "user_email": { "S.$": "$.userEmail" }
-        },
-        "UpdateExpression": "SET #s = :status, error_message = :err, updated_at = :now",
-        "ExpressionAttributeNames": {
-          "#s": "status"
-        },
-        "ExpressionAttributeValues": {
-          ":status": { "S": "FAILED" },
-          ":err": { "S": "Video generation workflow failed after all retry attempts." },
-          ":now": { "S.$": "$$.Execution.StartTime" }
-        }
-      },
-      "Next": "SetExecutionFailed"
-    },
-
-    "SetExecutionFailed": {
-      "Type": "Fail",
-      "Error": "WorkflowFailed",
-      "Cause": "Video generation workflow failed after all retry attempts."
-    },
-
-    "UpdateStatusPostProductionFailed": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::dynamodb:updateItem",
-      "Parameters": {
-        "TableName": "${UserRequestTableName}",
-        "Key": {
-          "uuid": { "S.$": "$.jobId" },
-          "user_email": { "S.$": "$.userEmail" }
-        },
-        "UpdateExpression": "SET #s = :status, error_message = :err, updated_at = :now",
-        "ExpressionAttributeNames": {
-          "#s": "status"
-        },
-        "ExpressionAttributeValues": {
-          ":status": { "S": "FAILED" },
-          ":err": { "S": "Video generation workflow failed during post-production rendering." },
-          ":now": { "S.$": "$$.Execution.StartTime" }
-        }
-      },
-      "Next": "SetExecutionPostProductionFailed"
-    },
-
-    "SetExecutionPostProductionFailed": {
-      "Type": "Fail",
-      "Error": "PostProductionFailed",
-      "Cause": "Video generation workflow failed during post-production rendering."
     }
   }
 }

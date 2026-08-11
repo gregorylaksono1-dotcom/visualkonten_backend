@@ -106,9 +106,10 @@ exports.handlePostResource = async (event) => {
         } catch (e) { }
         if (parsedAttr) {
           if (requestTypeUpper === "FREE_STORY" || requestTypeUpper === "MOTION_CONTROL") {
-            const dur = String(requestItem.duration_seconds || requestItem.duration || (requestTypeUpper === "MOTION_CONTROL" ? 10 : 20));
+            const dur = String(requestItem.duration_seconds || requestItem.duration || (requestTypeUpper === "MOTION_CONTROL" ? 10 : 30));
             let durAttr = parsedAttr[dur];
-            if (isFreeTrial && parsedAttr.freetrial !== undefined) {
+            const isBaseDur = (requestTypeUpper === "MOTION_CONTROL" && dur === "10") || (requestTypeUpper === "FREE_STORY" && dur === "30");
+            if (isFreeTrial && requestItem.free_trial === 1 && parsedAttr.freetrial !== undefined && isBaseDur) {
               durAttr = parsedAttr.freetrial;
               isFreeTrialUsed = true;
             }
@@ -117,7 +118,7 @@ exports.handlePostResource = async (event) => {
             }
           } else {
             let valToUse;
-            if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+            if (isFreeTrial && requestItem.free_trial === 1 && parsedAttr["freetrial"] !== undefined) {
               valToUse = parsedAttr["freetrial"];
               isFreeTrialUsed = true;
             } else {
@@ -344,6 +345,7 @@ exports.handlePostResource = async (event) => {
   const profileItem = await getCustomerProfile(userId);
   const isFreeTrial = Number(profileItem.free_trial || 0) > 0;
   let isFreeTrialUsed = false;
+  let appliedFreeTrialPricing = false;
 
   let finalAmount = pricing.amount;
   const requestTypeUpperVal = String(requestType || "").toUpperCase();
@@ -352,13 +354,16 @@ exports.handlePostResource = async (event) => {
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
     } catch (e) { }
-    const chosenDur = String(body.duration_seconds || body.duration || (requestTypeUpperVal === "MOTION_CONTROL" ? 10 : 20));
+    const chosenDur = String(body.duration_seconds || body.duration || (requestTypeUpperVal === "MOTION_CONTROL" ? 10 : 30));
     
     if (parsedAttr) {
       const freeTrialVal = parsedAttr["freetrial"];
       const normalVal = parsedAttr[chosenDur];
 
-      if (isFreeTrial && freeTrialVal !== undefined) {
+      const isBaseDur = (requestTypeUpperVal === "MOTION_CONTROL" && chosenDur === "10") || (requestTypeUpperVal === "FREE_STORY" && chosenDur === "30");
+
+      if (isFreeTrial && freeTrialVal !== undefined && isBaseDur) {
+        appliedFreeTrialPricing = true;
         if (typeof freeTrialVal === 'object') {
           finalAmount = isPreview ? Number(freeTrialVal.preview || 0) : Number(freeTrialVal.price || 0);
         } else {
@@ -391,6 +396,7 @@ exports.handlePostResource = async (event) => {
       let valToUse;
       if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
         valToUse = parsedAttr["freetrial"];
+        appliedFreeTrialPricing = true;
         if (!isPreview) isFreeTrialUsed = true;
       } else {
         const qNum = videoQuality.replace("p", "");
@@ -478,7 +484,7 @@ exports.handlePostResource = async (event) => {
     store_type: body.store_type || null,
     story_type: body.story_type || null,
     duration_seconds: body.duration_seconds || body.duration || null,
-    free_trial: requestType === "FREE-TRIAL" ? 1 : 0,
+    free_trial: (appliedFreeTrialPricing || requestType === "FREE-TRIAL") ? 1 : 0,
     preview: isPreview ? 1 : 0,
     video_gen_start_at: isPreview ? null : now,
     ...(videoRefKey ? { video_ref_key: videoRefKey } : {}),

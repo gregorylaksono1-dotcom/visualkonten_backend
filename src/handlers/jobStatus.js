@@ -65,7 +65,8 @@ exports.handleBatchStatus = async (event) => {
                 rating: item.rating ?? null,
                 review_text: item.review_text ?? null,
                 result_url: item.result_url || null,
-                generated_image: item.generated_image || null
+                generated_image: item.generated_image || null,
+                free_trial: item.free_trial ?? null
             };
             
             // Sanitize llm_response to hide prompts if needed, but for now we keep them to display on the frontend

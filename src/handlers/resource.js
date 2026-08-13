@@ -132,7 +132,9 @@ exports.handlePostResource = async (event) => {
         }
       }
 
-      const profileCreditBalance = Number(profileItem.credit_balance || 0);
+      finalAmount = Number(finalAmount) || 0;
+      let profileCreditBalance = Number(profileItem.credit_balance) || 0;
+
       if (!(profileCreditBalance >= finalAmount)) {
         return response(402, {
           error: "Kredit tidak mencukupi. Silakan top up kredit.",
@@ -423,7 +425,9 @@ exports.handlePostResource = async (event) => {
   const requestId = randomUUID();
   const now = getJakartaISOString();
 
-  const profileCreditBalance = Number(profileItem.credit_balance || 0);
+  finalAmount = Number(finalAmount) || 0;
+  let profileCreditBalance = Number(profileItem.credit_balance) || 0;
+
   if (!(profileCreditBalance >= finalAmount)) {
     return response(402, {
       error: "Kredit tidak mencukupi. Silakan top up kredit.",

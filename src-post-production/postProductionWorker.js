@@ -105,6 +105,31 @@ exports.handler = async (event, context) => {
       }
     }
 
+    if (post_production && Array.isArray(post_production.overlays)) {
+      for (const overlay of post_production.overlays) {
+        if (overlay.asset && overlay.asset.startsWith("s3://")) {
+          const match = overlay.asset.match(/^s3:\/\/([^/]+)\/(.+)$/);
+          if (match) {
+            const b = match[1];
+            const k = decodeURIComponent(match[2]);
+            const s3ClientForOverlay = new (require("@aws-sdk/client-s3").S3Client)({ region: process.env.AWS_REGION || "ap-southeast-1" });
+            const { GetObjectCommand } = require("@aws-sdk/client-s3");
+            const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+            try {
+              overlay.asset = await getSignedUrl(s3ClientForOverlay, new GetObjectCommand({ Bucket: b, Key: k }), { expiresIn: 3600 });
+              console.log(`[PostProductionWorker] Signed overlay asset: ${k}`);
+            } catch (err) {
+              console.warn(`[PostProductionWorker] Failed to sign overlay asset:`, err);
+            }
+          }
+        } else if (overlay.type === "logo" && ["logo", "L1", "L2", "P1", "P2"].includes(overlay.asset)) {
+          // Disable logo overlay if it was not resolved by genericTemplateHandler
+          console.log(`[PostProductionWorker] Disabling unresolved logo asset: ${overlay.asset}`);
+          overlay.enabled = false;
+        }
+      }
+    }
+
     console.log(`[PostProductionWorker] Starting render for Job ${jobId}...`);
     const renderResult = await renderMediaOnLambda({
       region: REGION,

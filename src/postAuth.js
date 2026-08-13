@@ -38,6 +38,8 @@ exports.handler = async (event) => {
           email: email || "",
           name,
           free_trial: 1,
+          credit_balance: 0,
+          credit_usage: 0,
           created_at: getJakartaISOString(),
           updated_at: getJakartaISOString(),
         },

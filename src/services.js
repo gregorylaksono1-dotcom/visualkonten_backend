@@ -588,6 +588,8 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
       expressionAttributeValues[":one"] = 1;
     }
 
+    const creditCondition = "((attribute_not_exists(credit_balance) AND :z >= :c) OR (attribute_exists(credit_balance) AND credit_balance >= :c))";
+
     await docClient.send(new TransactWriteCommand({
       TransactItems: [
         { Put: { TableName: USER_REQUEST_TABLE_NAME, Item: putItem } },
@@ -596,17 +598,13 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
             TableName: PROFILE_TABLE_NAME,
             Key: { user_id: String(userId), user_type: "CUSTOMER" },
             UpdateExpression:
-              requestType === "FREE-TRIAL"
+              requestType === "FREE-TRIAL" || isFreeTrialUsed
                 ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                : (isFreeTrialUsed
-                  ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                  : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now"),
+                : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
             ConditionExpression:
-              requestType === "FREE-TRIAL"
-                ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
-                : (isFreeTrialUsed
-                  ? "attribute_exists(user_id) AND credit_balance >= :c AND free_trial > :z"
-                  : "attribute_exists(user_id) AND credit_balance >= :c"),
+              requestType === "FREE-TRIAL" || isFreeTrialUsed
+                ? `attribute_exists(user_id) AND ${creditCondition} AND free_trial > :z`
+                : `attribute_exists(user_id) AND ${creditCondition}`,
             ExpressionAttributeValues: expressionAttributeValues,
           }
         },

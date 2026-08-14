@@ -1,0 +1,25 @@
+{
+  "name": "flashsale-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Data-driven Flash Sale video ad template (Remotion). Props diisi oleh LLM per produk.",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render FlashSale out/flashsale.mp4",
+    "still": "remotion still FlashSale out/frame.png --frame=200",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.504",
+    "@remotion/google-fonts": "^4.0.504",
+    "@remotion/layout-utils": "4.0.504",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.504",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "typescript": "^5.5.0"
+  }
+}

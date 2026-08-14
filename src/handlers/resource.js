@@ -366,14 +366,30 @@ exports.handlePostResource = async (event) => {
       const isBaseDur = (requestTypeUpperVal === "MOTION_CONTROL" && chosenDur === "10") || (requestTypeUpperVal === "FREE_STORY" && chosenDur === "30");
 
       if (isFreeTrial && freeTrialVal !== undefined && isBaseDur) {
-        appliedFreeTrialPricing = true;
-        if (typeof freeTrialVal === 'object') {
-          finalAmount = isPreview ? Number(freeTrialVal.preview || 0) : Number(freeTrialVal.price || 0);
+        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+        if (isPreview && freePreviewQuota <= 0 && Number(profileItem.credit_balance) > 0) {
+          // Fallback to normal pricing
+          if (normalVal === undefined) {
+            return response(400, {
+              error: "Kredit dan durasi tidak sesuai",
+              error_code: "INVALID_DURATION_PRICING"
+            });
+          }
+          if (typeof normalVal === 'object') {
+            finalAmount = isPreview ? Number(normalVal.preview || 0) : Number(normalVal.price || 0);
+          } else {
+            finalAmount = Number(normalVal);
+          }
         } else {
-          finalAmount = Number(freeTrialVal);
-        }
-        if (!isPreview) {
-          isFreeTrialUsed = true;
+          appliedFreeTrialPricing = true;
+          if (typeof freeTrialVal === 'object') {
+            finalAmount = isPreview ? Number(freeTrialVal.preview || 0) : Number(freeTrialVal.price || 0);
+          } else {
+            finalAmount = Number(freeTrialVal);
+          }
+          if (!isPreview) {
+            isFreeTrialUsed = true;
+          }
         }
       } else {
         if (normalVal === undefined) {
@@ -398,9 +414,15 @@ exports.handlePostResource = async (event) => {
     if (parsedAttr) {
       let valToUse;
       if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-        valToUse = parsedAttr["freetrial"];
-        appliedFreeTrialPricing = true;
-        if (!isPreview) isFreeTrialUsed = true;
+        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+        if (isPreview && freePreviewQuota <= 0 && Number(profileItem.credit_balance) > 0) {
+          const qNum = videoQuality.replace("p", "");
+          valToUse = parsedAttr[`${qNum}`];
+        } else {
+          valToUse = parsedAttr["freetrial"];
+          appliedFreeTrialPricing = true;
+          if (!isPreview) isFreeTrialUsed = true;
+        }
       } else {
         const qNum = videoQuality.replace("p", "");
         valToUse = parsedAttr[`${qNum}`];
@@ -427,6 +449,17 @@ exports.handlePostResource = async (event) => {
 
   finalAmount = Number(finalAmount) || 0;
   let profileCreditBalance = Number(profileItem.credit_balance) || 0;
+
+  const isFreePreviewUsed = isPreview && (appliedFreeTrialPricing || requestType === "FREE-TRIAL");
+  if (isFreePreviewUsed) {
+    const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+    if (freePreviewQuota <= 0) {
+      return response(402, {
+        error: "Batas pembuatan preview gratis telah habis. Silakan gunakan fitur 'Buat Sekarang' atau Top Up kredit Anda.",
+        error_code: "FREE_PREVIEW_LIMIT_REACHED"
+      });
+    }
+  }
 
   if (!(profileCreditBalance >= finalAmount)) {
     return response(402, {
@@ -502,7 +535,8 @@ exports.handlePostResource = async (event) => {
     userId,
     requestType,
     now,
-    isFreeTrialUsed
+    isFreeTrialUsed,
+    isFreePreviewUsed
   });
   if (errRes) return errRes;
 

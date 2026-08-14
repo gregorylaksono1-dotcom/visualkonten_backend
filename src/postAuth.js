@@ -40,6 +40,7 @@ exports.handler = async (event) => {
           free_trial: 1,
           credit_balance: 0,
           credit_usage: 0,
+          free_preview_quota: 2,
           created_at: getJakartaISOString(),
           updated_at: getJakartaISOString(),
         },

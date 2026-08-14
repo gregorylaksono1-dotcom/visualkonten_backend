@@ -581,14 +581,29 @@ const createTopupOrder = async ({ orderId, userEmail, userId, amount, total, now
   }));
 };
 
-const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now, isFreeTrialUsed }) => {
+const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId, requestType, now, isFreeTrialUsed, isFreePreviewUsed = false }) => {
   try {
     const expressionAttributeValues = { ":z": 0, ":c": finalAmount, ":now": now };
     if (requestType === "FREE-TRIAL" || isFreeTrialUsed) {
       expressionAttributeValues[":one"] = 1;
     }
+    if (isFreePreviewUsed) {
+      expressionAttributeValues[":one"] = 1;
+      expressionAttributeValues[":two"] = 2;
+    }
 
     const creditCondition = "((attribute_not_exists(credit_balance) AND :z >= :c) OR (attribute_exists(credit_balance) AND credit_balance >= :c))";
+
+    let updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now";
+    let conditionExpr = `attribute_exists(user_id) AND ${creditCondition}`;
+
+    if (requestType === "FREE-TRIAL" || isFreeTrialUsed) {
+      updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now";
+      conditionExpr = `attribute_exists(user_id) AND ${creditCondition} AND free_trial > :z`;
+    } else if (isFreePreviewUsed) {
+      updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_preview_quota = if_not_exists(free_preview_quota, :two) - :one, updated_at = :now";
+      conditionExpr = `attribute_exists(user_id) AND ${creditCondition} AND (attribute_not_exists(free_preview_quota) OR free_preview_quota > :z)`;
+    }
 
     await docClient.send(new TransactWriteCommand({
       TransactItems: [
@@ -597,14 +612,8 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
           Update: {
             TableName: PROFILE_TABLE_NAME,
             Key: { user_id: String(userId), user_type: "CUSTOMER" },
-            UpdateExpression:
-              requestType === "FREE-TRIAL" || isFreeTrialUsed
-                ? "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now"
-                : "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, updated_at = :now",
-            ConditionExpression:
-              requestType === "FREE-TRIAL" || isFreeTrialUsed
-                ? `attribute_exists(user_id) AND ${creditCondition} AND free_trial > :z`
-                : `attribute_exists(user_id) AND ${creditCondition}`,
+            UpdateExpression: updateExpr,
+            ConditionExpression: conditionExpr,
             ExpressionAttributeValues: expressionAttributeValues,
           }
         },
@@ -618,6 +627,12 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
       return response(402, { error: "Akses Tester sudah terpakai" });
     }
     if (err.name === "TransactionCanceledException") {
+      if (isFreePreviewUsed) {
+        return response(402, {
+          error: "Batas pembuatan preview gratis telah habis. Silakan gunakan fitur 'Buat Sekarang' atau Top Up kredit Anda.",
+          error_code: "FREE_PREVIEW_LIMIT_REACHED"
+        });
+      }
       return response(402, {
         error: INSUFFICIENT_CREDIT_MESSAGE,
         error_code: "INSUFFICIENT_CREDIT",

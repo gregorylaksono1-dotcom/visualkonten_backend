@@ -81,34 +81,60 @@ export const Features: React.FC<{
   // teks di kartu terang (announcement) → warna paling kontras dari palet; di gelap → ink terang
   const rowColor = isAnnouncement ? readableTextColor(p.ink, p) : p.ink;
   const renderRows = (asCard: boolean) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: asCard ? 0 : 22, width: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: asCard ? 0 : 18, width: "100%", alignItems: "stretch" }}>
       {scene.items?.map((raw: string, i: number) => {
         const item = sanitizeText(raw);
         if (!item) return null;
         const iconName = scene.icons?.[i] || "sparkle";
-        const spr = spring({ fps, frame: frame - (12 + i * 8), config: { damping: 14 } });
+        const spr = spring({ fps, frame: frame - (12 + i * 7), config: { damping: 13 } });
+        const idle = Math.sin(frame * 0.07 + i * 1.3) * 4;
+        const enterX = interpolate(spr, [0, 1], [i % 2 ? 40 : -40, 0]);
+
+        if (asCard) {
+          // ANNOUNCEMENT ticket rows (tetap)
+          return (
+            <div key={i} style={{
+              display: "flex", alignItems: "center", gap: 20, width: "100%", padding: "22px 6px",
+              borderTop: i > 0 ? `2px dashed ${p.brandB}22` : undefined,
+              opacity: spr, transform: `translateX(${interpolate(spr, [0, 1], [-24, 0])}px)`,
+            }}>
+              <div style={{ position: "relative", width: 60, height: 60, flexShrink: 0, borderRadius: 18, background: `${p.brandA}18`, display: "flex", justifyContent: "center", alignItems: "center", transform: `scale(${interpolate(spr, [0, 1], [0, 1])})` }}>
+                <div style={{ width: 32, height: 32 }}>{getFeatureIcon(iconName, p.brandA)}</div>
+              </div>
+              <span style={{ fontFamily: "Inter, sans-serif", fontWeight: 700, fontSize: 36 * mood.fontScale, color: rowColor }}>{item}</span>
+            </div>
+          );
+        }
+
+        // PRODUCT rows — kartu dinamis: zigzag + accent stripe + icon fill + chevron
         return (
           <div key={i} style={{
-            display: "flex", alignItems: "center", gap: 20, width: "100%",
-            padding: asCard ? "22px 6px" : "18px 28px",
-            borderTop: asCard && i > 0 ? `2px dashed ${p.brandB}22` : undefined,
-            background: asCard ? "transparent" : `linear-gradient(90deg, ${p.accent}14, ${p.accent}08)`,
-            border: asCard ? undefined : `1px solid ${p.accent}33`,
-            borderRadius: asCard ? 0 : 18,
-            opacity: spr, transform: `translateX(${interpolate(spr, [0, 1], [-24, 0])}px)`,
+            alignSelf: i % 2 ? "flex-end" : "flex-start",
+            width: "94%",
+            display: "flex", alignItems: "center", gap: 18,
+            padding: "16px 22px 16px 16px",
+            borderRadius: 22,
+            background: `linear-gradient(100deg, ${p.accent}26 0%, ${p.accent}0d 70%)`,
+            borderLeft: `6px solid ${p.accent}`,
+            boxShadow: `0 12px 26px rgba(0,0,0,0.28)`,
+            backdropFilter: "blur(4px)",
+            opacity: spr,
+            transform: `translateX(${enterX}px) translateY(${idle}px) rotate(${interpolate(spr, [0, 1], [i % 2 ? 3 : -3, 0])}deg)`,
           }}>
-            {/* icon in accent chip */}
-            <div style={{
-              width: 56, height: 56, flexShrink: 0, borderRadius: 16,
-              background: asCard ? `${p.brandA}18` : `${p.accent}22`,
+            {/* icon square ber-gradient aksen + nomor */}
+            <div style={{ position: "relative", width: 62, height: 62, flexShrink: 0, borderRadius: 16,
+              background: `linear-gradient(145deg, ${p.accent}, ${p.brandA})`,
               display: "flex", justifyContent: "center", alignItems: "center",
-              transform: `scale(${interpolate(spr, [0, 1], [0, 1])})`,
-            }}>
-              <div style={{ width: 30, height: 30 }}>{getFeatureIcon(iconName, asCard ? p.brandA : p.accent)}</div>
+              boxShadow: `0 8px 18px ${p.accent}55`,
+              transform: `scale(${interpolate(spr, [0, 1], [0, 1])}) rotate(${interpolate(spr, [0, 1], [-30, 0])}deg)` }}>
+              <div style={{ width: 32, height: 32 }}>{getFeatureIcon(iconName, "#ffffff")}</div>
+              <div style={{ position: "absolute", top: -9, left: -9, width: 28, height: 28, borderRadius: "50%",
+                background: p.ink, color: p.brandB, display: "flex", justifyContent: "center", alignItems: "center",
+                fontFamily: "Poppins, sans-serif", fontWeight: 900, fontSize: 15, boxShadow: `0 3px 8px rgba(0,0,0,0.3)` }}>{i + 1}</div>
             </div>
-            <span style={{ fontFamily: "Inter, sans-serif", fontWeight: 700, fontSize: 36 * mood.fontScale, color: rowColor }}>
-              {item}
-            </span>
+            <span style={{ flex: 1, fontFamily: "Inter, sans-serif", fontWeight: 800, fontSize: 34 * mood.fontScale, color: rowColor }}>{item}</span>
+            {/* chevron aksen */}
+            <div style={{ width: 14, height: 14, flexShrink: 0, borderTop: `4px solid ${p.accent}`, borderRight: `4px solid ${p.accent}`, transform: "rotate(45deg)", opacity: 0.85 }} />
           </div>
         );
       })}

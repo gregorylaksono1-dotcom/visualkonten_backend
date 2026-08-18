@@ -85,11 +85,34 @@ async function callOpenAIImageEdit({ apiKey, prompt, size, referenceUrls }) {
     input.image_urls = [kieRefUrl];
   }
 
-  console.log(`[Kie.ai ImageGen] Creating task for model ${model} with prompt: "${prompt.slice(0, 100)}..."`);
-  const taskId = await createKieTask(model, input, null, kieApiKey);
+  const maxRetries = 3;
+  let attempt = 0;
+  let taskResult = null;
+  let lastError = null;
 
-  console.log(`[Kie.ai ImageGen] Waiting for task completion: ${taskId}...`);
-  const taskResult = await waitForKieTask(taskId, kieApiKey);
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      console.log(`[Kie.ai ImageGen] (Attempt ${attempt}/${maxRetries}) Creating task for model ${model} with prompt: "${prompt.slice(0, 100)}..."`);
+      const taskId = await createKieTask(model, input, null, kieApiKey);
+
+      console.log(`[Kie.ai ImageGen] Waiting for task completion: ${taskId}...`);
+      taskResult = await waitForKieTask(taskId, kieApiKey);
+      break; // Success
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Kie.ai ImageGen] Attempt ${attempt} failed: ${err.message}`);
+      if (attempt < maxRetries) {
+        const backoff = attempt * 2000; // 2s, 4s
+        console.log(`[Kie.ai ImageGen] Retrying in ${backoff}ms...`);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  }
+
+  if (!taskResult) {
+    throw lastError;
+  }
 
   const urlData = findMediaUrlInKieData(taskResult);
   if (urlData) {

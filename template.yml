@@ -493,6 +493,13 @@ Resources:
           Resource:
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}
           - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - states:StartExecution
+          Resource:
+          - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-MotionGraphics${EnvironmentSuffix}
       Environment:
         Variables:
           CONFIG_SSM_PATH:
@@ -523,6 +530,7 @@ Resources:
             Ref: ComfyUIWorkerFunction
           FREE_TRIAL_FUNCTION_NAME:
             Ref: FreeTrialWorkerFunction
+          MOTION_GRAPHICS_STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-MotionGraphics${EnvironmentSuffix}
       Events:
         GetUser:
           Type: Api
@@ -1083,6 +1091,43 @@ Resources:
         External:
         - "@aws-sdk/client-sfn"
 
+  MotionGraphicsImageGenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/imageGenTrigger.handler
+      Runtime: nodejs22.x
+      Architectures:
+        - x86_64
+      Timeout: 60
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref ConfigSsmPath
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+            - Effect: Allow
+              Action:
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+              Resource: "*"
+
+    Metadata:
+      SamResourceId: MotionGraphicsImageGenFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - handlers/imageGenTrigger.js
+        External:
+        - "@aws-sdk/client-ssm"
+        - "@aws-sdk/client-sfn"
+
   MotionGraphicsWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1225,6 +1270,7 @@ Resources:
           - states:DescribeExecution
           Resource:
           - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-VideoGeneration${EnvironmentSuffix}:*
+          - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:MotionGraphicsStateMachine-${EnvironmentSuffix}:*
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME:
@@ -1271,6 +1317,245 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
 
+
+  MotionGraphicsLLMFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/llm.handler
+      Runtime: nodejs22.x
+      Timeout: 60
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
+        - AWSLambda_FullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref ConfigSsmPath
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
+          REMOTION_REGION: !Ref RemotionMotionGraphicsAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionMotionGraphicsServeUrl
+
+    Metadata:
+      SamResourceId: MotionGraphicsLLMFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - handlers/llm.js
+        External:
+        - "@aws-sdk/client-ssm"
+        - "@aws-sdk/client-s3"
+        - "@aws-sdk/client-dynamodb"
+        - "@aws-sdk/lib-dynamodb"
+
+  MotionGraphicsErrorHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/errorHandler.handler
+      Runtime: nodejs22.x
+      Timeout: 30
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+      Environment:
+        Variables:
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+    Metadata:
+      SamResourceId: MotionGraphicsErrorHandlerFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - handlers/errorHandler.js
+        External:
+        - "@aws-sdk/client-dynamodb"
+        - "@aws-sdk/lib-dynamodb"
+
+  MotionGraphicsMusicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/music.handler
+      Runtime: nodejs22.x
+      Timeout: 60
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
+        - AWSLambda_FullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref ConfigSsmPath
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
+          REMOTION_REGION: !Ref RemotionMotionGraphicsAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionMotionGraphicsServeUrl
+
+    Metadata:
+      SamResourceId: MotionGraphicsMusicFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - handlers/music.js
+        External:
+        - "@aws-sdk/client-ssm"
+        - "@aws-sdk/client-s3"
+        - "@aws-sdk/client-dynamodb"
+        - "@aws-sdk/lib-dynamodb"
+
+  MotionGraphicsPixianFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/pixian.handler
+      Runtime: nodejs22.x
+      Timeout: 60
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
+        - AWSLambda_FullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref ConfigSsmPath
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
+          REMOTION_REGION: !Ref RemotionMotionGraphicsAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionMotionGraphicsServeUrl
+
+    Metadata:
+      SamResourceId: MotionGraphicsPixianFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        EntryPoints:
+        - handlers/pixian.js
+        External:
+        - "@aws-sdk/client-ssm"
+        - "@aws-sdk/client-s3"
+        - "@aws-sdk/client-dynamodb"
+        - "@aws-sdk/lib-dynamodb"
+
+  MotionGraphicsRenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src-motion-graphics/
+      Handler: handlers/renderTrigger.handler
+      Runtime: nodejs22.x
+      Timeout: 60
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
+        - AWSLambda_FullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref ConfigSsmPath
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
+          REMOTION_REGION: !Ref RemotionMotionGraphicsAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionMotionGraphicsServeUrl
+
+    Metadata:
+      SamResourceId: MotionGraphicsRenderFunction
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+        - handlers/renderTrigger.js
+        External:
+        - "@aws-sdk/client-ssm"
+        - "@aws-sdk/client-s3"
+        - "@aws-sdk/client-dynamodb"
+        - "@aws-sdk/lib-dynamodb"
+
+  MotionGraphicsStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub BikinAi-MotionGraphics${EnvironmentSuffix}
+      DefinitionUri: statemachine/motion_graphics_flow.asl.json
+      DefinitionSubstitutions:
+        PostProductionFunctionArn: !GetAtt PostProductionFunction.Arn
+        UserRequestTableName: !Ref UserRequestTable
+        MotionGraphicsLLMFunction: !GetAtt MotionGraphicsLLMFunction.Arn
+        MotionGraphicsMusicFunction: !GetAtt MotionGraphicsMusicFunction.Arn
+        MotionGraphicsPixianFunction: !GetAtt MotionGraphicsPixianFunction.Arn
+        MotionGraphicsRenderFunction: !GetAtt MotionGraphicsRenderFunction.Arn
+        MotionGraphicsImageGenFunction: !GetAtt MotionGraphicsImageGenFunction.Arn
+        MotionGraphicsErrorHandlerFunction: !GetAtt MotionGraphicsErrorHandlerFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsLLMFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsMusicFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsPixianFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsRenderFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsImageGenFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MotionGraphicsErrorHandlerFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PostProductionFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
   VoucherTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -1340,7 +1625,7 @@ Outputs:
 # check log di dev
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
 # sam logs -n PostProductionFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
-
+# sam logs --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail
 # check log di prod
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production
 # sam logs -n ComfyUIWebhookFunction --stack-name BikinAi-backend-prod --profile production --region ap-southeast-1 --tail

@@ -421,7 +421,17 @@ async function processComfyUICompletion(params) {
       let s3Key;
       let outputObj = {};
 
-      if (isImage) {
+      const requestType = queryParams?.["request-type"];
+      if (requestType === "MOTION_GRAPHIC") {
+        console.log(`[ComfyUI Webhook SFN Callback] Handling MOTION_GRAPHIC specifically...`);
+        const type = queryParams.type || "lifestyle";
+        const id = queryParams.id || Date.now().toString();
+        s3Key = `generated_image/${userId}/motion_graphic/${jobId}_${id}.png`;
+        outputObj = { s3key: s3Key, id, type };
+        
+        // If there's any specific DynamoDB update needed for Motion Graphic, it goes here
+        // Currently we just return the s3key via SFN Task Token
+      } else if (isImage) {
         const type = queryParams.type || "lock";
         const id = queryParams.id || "main";
         const subfolder = type === "lock" ? "locks" : "scenes";

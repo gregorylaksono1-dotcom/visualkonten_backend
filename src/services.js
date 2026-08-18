@@ -744,7 +744,58 @@ const incrementPricingPopularity = async (key) => {
   }
 };
 
+
+const { SFNClient, StartExecutionCommand } = require("@aws-sdk/client-sfn");
+const sfnClient = new SFNClient({});
+
+const invokeMotionGraphicsStateMachine = async (jobId, payload) => {
+  const stateMachineArn = process.env.MOTION_GRAPHICS_STATE_MACHINE_ARN;
+  if (!stateMachineArn) {
+    throw new Error("MOTION_GRAPHICS_STATE_MACHINE_ARN is not configured.");
+  }
+
+  const imageUrl = payload.s3ImageUrls && payload.s3ImageUrls.length > 0 ? payload.s3ImageUrls[0] : null;
+  const executionPayload = {
+    originalInput: {
+      ...payload,
+      imageUrl
+    }
+  };
+
+  const command = new StartExecutionCommand({
+    stateMachineArn,
+    name: `MG-${jobId}-${Date.now()}`,
+    input: JSON.stringify(executionPayload)
+  });
+
+  const response = await sfnClient.send(command);
+  console.log(`Started Step Function execution for job ${jobId}: ${response.executionArn}`);
+
+  try {
+    await docClient.send(new UpdateCommand({
+      TableName: process.env.USER_REQUEST_TABLE_NAME,
+      Key: { uuid: jobId, user_email: payload.userEmail },
+      UpdateExpression: "SET sfn_execution_arn = :arn, updated_at = :now",
+      ExpressionAttributeValues: {
+        ":arn": response.executionArn,
+        ":now": new Date().toISOString()
+      }
+    }));
+  } catch (dbErr) {
+    console.error("Failed to update sfn_execution_arn in DynamoDB", dbErr);
+  }
+
+  try {
+    const { sendTelegramMessage } = require("./lib/telegram");
+    await sendTelegramMessage(`user "${payload.userEmail}" melakukan generasi MOTION_GRAPHIC`);
+  } catch (teleErr) {
+    console.error("[Telegram alert failed]", teleErr.message);
+  }
+
+  return response;
+};
 module.exports = {
+  invokeMotionGraphicsStateMachine,
   docClient,
   s3Client,
   lambdaClient,

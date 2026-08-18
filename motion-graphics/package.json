@@ -5,8 +5,8 @@
   "description": "Data-driven Flash Sale video ad template (Remotion). Props diisi oleh LLM per produk.",
   "scripts": {
     "dev": "remotion studio",
-    "render": "remotion render FlashSale out/flashsale.mp4",
-    "still": "remotion still FlashSale out/frame.png --frame=200",
+    "render": "remotion render MotionGeneral out/video.mp4",
+    "still": "remotion still MotionGeneral out/frame.png --frame=200",
     "upgrade": "remotion upgrade"
   },
   "dependencies": {
@@ -16,7 +16,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "remotion": "4.0.504",
-    "zod": "^3.25.76"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

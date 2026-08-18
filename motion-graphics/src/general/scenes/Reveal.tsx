@@ -4,6 +4,7 @@ import { Props } from "../schema";
 import { getMoodConfig, sanitizeText, readableTextColor } from "../theme";
 import { Emblem } from "./Emblem";
 import { FitText } from "./FitText";
+import { SceneDecor } from "./SceneDecor";
 
 export const Reveal: React.FC<{ 
   scene: any; 
@@ -145,8 +146,9 @@ export const Reveal: React.FC<{
       flexDirection: "column", 
       justifyContent: isBackdrop ? "flex-end" : "center", 
       alignItems: "center", 
-      gap: 40 
+      gap: 40
     }}>
+      {!isBackdrop && <SceneDecor palette={theme.palette!} />}
       {effectiveHeroMode === "image" && renderImageHero()}
 
       {effectiveHeroMode === "emblem" && (

@@ -4,6 +4,8 @@ import { Props } from "../schema";
 import { getMoodConfig, sanitizeText, readableTextColor } from "../theme";
 import { Emblem } from "./Emblem";
 import { FitText } from "./FitText";
+import { KineticText } from "./KineticText";
+import { SceneDecor } from "./SceneDecor";
 
 // Momen 1 (padat): hook + reveal digabung — kicker + hero produk/emblem + nama + tagline/date.
 export const HeroPunch: React.FC<{
@@ -73,6 +75,7 @@ export const HeroPunch: React.FC<{
       display: "flex", flexDirection: "column",
       justifyContent: isBackdrop ? "flex-end" : "center", alignItems: "center", gap: 18,
     }}>
+      {!isBackdrop && <SceneDecor palette={p} />}
       {isAnnouncement && announcement?.ribbon && (
         <div style={{
           background: p.brandB, color: readableTextColor(p.brandB, p), padding: "8px 22px", borderRadius: 8,
@@ -84,17 +87,17 @@ export const HeroPunch: React.FC<{
       )}
 
       {kicker && (
-        <div style={{ opacity: spring({ fps, frame }), transform: `translateY(${interpolate(spring({ fps, frame }), [0, 1], [-24, 0])}px)` }}>
-          <FitText text={kicker} maxFontSize={56 * mood.fontScale} maxBoxWidth={width * 0.9} maxLines={2}
+        <div style={{ position: "relative", zIndex: 1, opacity: spring({ fps, frame }), transform: `translateY(${interpolate(spring({ fps, frame }), [0, 1], [-24, 0])}px)` }}>
+          <KineticText text={kicker} maxFontSize={58 * mood.fontScale} maxBoxWidth={width * 0.9} maxLines={2}
             fontFamily="Poppins, sans-serif" fontWeight={900}
-            style={{ color: isBackdrop ? "#fff" : p.accent, textAlign: "center", lineHeight: 1.05, letterSpacing: 1 }} />
+            color={isBackdrop ? "#fff" : p.ink} underline={p.accent} />
         </div>
       )}
 
       {renderHero()}
 
       {name && (
-        <div style={{ opacity: spring({ fps, frame: frame - 8 }), transform: `translateY(${interpolate(spring({ fps, frame: frame - 8 }), [0, 1], [20, 0])}px)` }}>
+        <div style={{ position: "relative", zIndex: 1, opacity: spring({ fps, frame: frame - 8 }), transform: `translateY(${interpolate(spring({ fps, frame: frame - 8 }), [0, 1], [20, 0])}px)` }}>
           <FitText text={name} maxFontSize={72 * mood.fontScale} maxBoxWidth={width * 0.9} maxLines={2}
             fontFamily="Poppins, sans-serif" fontWeight={900}
             style={{
@@ -108,13 +111,13 @@ export const HeroPunch: React.FC<{
       )}
 
       {dateHero ? (
-        <div style={{ opacity: spring({ fps, frame: frame - 12 }) }}>
+        <div style={{ position: "relative", zIndex: 1, opacity: spring({ fps, frame: frame - 12 }) }}>
           <FitText text={dateHero} maxFontSize={64 * mood.fontScale} maxBoxWidth={width * 0.85} maxLines={1}
             fontFamily="Poppins, sans-serif" fontWeight={900}
             style={{ color: isBackdrop ? "#fff" : p.accent, textAlign: "center", textShadow: `0 8px 24px ${p.accent}55` }} />
         </div>
       ) : tagline ? (
-        <div style={{ opacity: spring({ fps, frame: frame - 12 }) }}>
+        <div style={{ position: "relative", zIndex: 1, opacity: spring({ fps, frame: frame - 12 }) }}>
           <FitText text={tagline} maxFontSize={36 * mood.fontScale} maxBoxWidth={width * 0.82} maxLines={1}
             fontFamily="Inter, sans-serif" fontWeight={600}
             style={{

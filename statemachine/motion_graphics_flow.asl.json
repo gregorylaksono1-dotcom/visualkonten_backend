@@ -1,0 +1,328 @@
+{
+  "Comment": "Motion Graphics Step Function Flow",
+  "StartAt": "GeneratePropsLLM",
+  "States": {
+    "GeneratePropsLLM": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${MotionGraphicsLLMFunction}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "ParallelProcess",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "ParallelProcess": {
+      "Type": "Parallel",
+      "Next": "GenerateLifestyleImage",
+      "ResultPath": "$.parallelResults",
+      "Branches": [
+        {
+          "StartAt": "CheckPixianCondition",
+          "States": {
+            "CheckPixianCondition": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.originalInput.imageUrl",
+                      "IsPresent": true
+                    },
+                    {
+                      "Variable": "$.originalInput.imageUrl",
+                      "IsNull": false
+                    },
+                    {
+                      "Variable": "$.llmProps.product",
+                      "IsPresent": true
+                    },
+                    {
+                      "Variable": "$.llmProps.product.background_removal",
+                      "IsPresent": true
+                    },
+                    {
+                      "Variable": "$.llmProps.product.background_removal",
+                      "BooleanEquals": true
+                    }
+                  ],
+                  "Next": "RemoveBackgroundPixian"
+                }
+              ],
+              "Default": "PassNoImage"
+            },
+            "PassNoImage": {
+              "Type": "Pass",
+              "Result": {
+                "processedImageUrl": null
+              },
+              "ResultPath": "$.pixianResult",
+              "End": true
+            },
+            "RemoveBackgroundPixian": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${MotionGraphicsPixianFunction}",
+                "Payload.$": "$"
+              },
+              "ResultSelector": {
+                "processedImageUrl.$": "$.Payload.processedImageUrl"
+              },
+              "ResultPath": "$.pixianResult",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "GenerateMusic",
+          "States": {
+            "GenerateMusic": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${MotionGraphicsMusicFunction}",
+                "Payload.$": "$"
+              },
+              "ResultSelector": {
+                "musicUrl.$": "$.Payload.musicUrl"
+              },
+              "ResultPath": "$.musicResult",
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "TriggerRemotionRender": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${MotionGraphicsRenderFunction}",
+        "Payload": {
+          "originalInput.$": "$.originalInput",
+          "llmProps.$": "$.llmProps",
+          "processedImageUrl.$": "$.parallelResults[0].pixianResult.processedImageUrl",
+          "musicUrl.$": "$.parallelResults[1].musicResult.musicUrl",
+          "taskToken.$": "$$.Task.Token",
+          "imageGenResult.$": "$.imageGenResult"
+        }
+      },
+      "ResultPath": "$.mergeResult",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "CheckPostProduction",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "CheckPostProduction": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.llmProps.post_production",
+          "IsPresent": true,
+          "Next": "TriggerPostProduction"
+        }
+      ],
+      "Default": "UpdateStatusCompleted"
+    },
+    "TriggerPostProduction": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${PostProductionFunctionArn}",
+        "Payload": {
+          "jobId.$": "$.originalInput.jobId",
+          "userEmail.$": "$.originalInput.userEmail",
+          "userId.$": "$.originalInput.userId",
+          "llm_response.$": "$.llmProps",
+          "videoUrl.$": "$.mergeResult.Payload.result_url",
+          "taskToken.$": "$$.Task.Token"
+        }
+      },
+      "ResultPath": "$.mergeResult",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "UpdateStatusCompleted",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "UpdateStatusCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${UserRequestTableName}",
+        "Key": {
+          "uuid": {
+            "S.$": "$.originalInput.jobId"
+          },
+          "user_email": {
+            "S.$": "$.originalInput.userEmail"
+          }
+        },
+        "UpdateExpression": "SET #s = :status, result_url = :res, updated_at = :now",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "COMPLETED"
+          },
+          ":res": {
+            "S.$": "$.mergeResult.Payload.result_url"
+          },
+          ":now": {
+            "S.$": "$.mergeResult.Payload.completedAt"
+          }
+        }
+      },
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "GenerateLifestyleImage": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${MotionGraphicsImageGenFunction}",
+        "Payload": {
+          "originalInput.$": "$.originalInput",
+          "llmProps.$": "$.llmProps",
+          "taskToken.$": "$$.Task.Token"
+        }
+      },
+      "ResultPath": "$.imageGenResult",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "TriggerRemotionRender",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.errorDetails",
+          "Next": "HandleFailure"
+        }
+      ]
+    },
+    "HandleFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${MotionGraphicsErrorHandlerFunction}",
+        "Payload": {
+          "originalInput.$": "$.originalInput",
+          "errorDetails.$": "$.errorDetails"
+        }
+      },
+      "Next": "FailState"
+    },
+    "FailState": {
+      "Type": "Fail",
+      "Cause": "Motion Graphics Pipeline Failed"
+    }
+  }
+}

@@ -3,33 +3,39 @@ import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig, interpolate } fr
 import { Props } from "../schema";
 import { getMoodConfig, readableTextColor } from "../theme";
 import { FitText } from "./FitText";
+import { KineticText } from "./KineticText";
+import { SceneDecor } from "./SceneDecor";
 
 export const Cta: React.FC<{ scene: any; theme: Props["theme"] }> = ({ scene, theme }) => {
   const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const mood = getMoodConfig(theme.mood);
+  const p = theme.palette!;
 
   // Button pulse loop
   const pulse = Math.sin((frame / fps) * 4) * 0.05;
 
   return (
-    <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", padding: 64 }}>
+    <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", padding: 56 }}>
+      <SceneDecor palette={p} />
       {scene.headline && (
         <div
           style={{
-            marginBottom: 64,
+            marginBottom: 56,
+            zIndex: 1,
             transform: `translateY(${interpolate(spring({ fps, frame }), [0, 1], [50, 0])}px)`,
             opacity: spring({ fps, frame }),
           }}
         >
-          <FitText
+          <KineticText
             text={scene.headline}
-            maxFontSize={80 * mood.fontScale}
+            maxFontSize={84 * mood.fontScale}
             maxBoxWidth={width * 0.86}
             maxLines={2}
             fontFamily="Poppins, sans-serif"
             fontWeight={900}
-            style={{ color: theme.palette.ink, textAlign: "center", lineHeight: 1.1 }}
+            color={theme.palette.ink}
+            underline={theme.palette.accent}
           />
         </div>
       )}
@@ -47,6 +53,8 @@ export const Cta: React.FC<{ scene: any; theme: Props["theme"] }> = ({ scene, th
             boxShadow: `0 24px 48px ${theme.palette.accent}80`,
             transform: `scale(${spring({ fps, frame: frame - 10, config: { damping: 12 } }) + pulse})`,
             marginBottom: 48,
+            position: "relative",
+            zIndex: 1,
           }}
         >
           <FitText
@@ -68,6 +76,8 @@ export const Cta: React.FC<{ scene: any; theme: Props["theme"] }> = ({ scene, th
             fontWeight: 600,
             fontSize: 40 * mood.fontScale,
             color: theme.palette.ink,
+            position: "relative",
+            zIndex: 1,
             opacity: interpolate(spring({ fps, frame: frame - 20 }), [0, 1], [0, 0.8]),
           }}
         >

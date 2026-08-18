@@ -3,7 +3,7 @@ const path = require("path");
 const https = require("https");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
-const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, executeResourceRequestTransaction, docClient, GetCommand, UpdateCommand } = require("../services");
+const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, invokeMotionGraphicsStateMachine,  executeResourceRequestTransaction, docClient, GetCommand, UpdateCommand } = require("../services");
 const { sendTelegramMessage } = require("../lib/telegram");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -406,6 +406,20 @@ exports.handlePostResource = async (event) => {
       }
     }
 
+  } else if (pricing.item.type === "motion_graphic" || requestTypeUpperVal === "MOTION_GRAPHICS" || requestTypeUpperVal === "MOTION-GRAPHICS") {
+    let parsedAttr = null;
+    try {
+      parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
+    } catch (e) { }
+    if (parsedAttr) {
+      if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
+         finalAmount = Number(parsedAttr["freetrial"]);
+         appliedFreeTrialPricing = true;
+         isFreeTrialUsed = true;
+      } else if (parsedAttr["main"] !== undefined) {
+         finalAmount = Number(parsedAttr["main"]);
+      }
+    }
   } else if (pricing.item.attr) {
     let parsedAttr = null;
     try {
@@ -469,7 +483,10 @@ exports.handlePostResource = async (event) => {
       current_credit: profileCreditBalance,
     });
   }
-  if (requestType === "FREE-TRIAL") {
+
+    if (requestType === "MOTION_GRAPHICS" || requestType === "MOTION-GRAPHICS" || body.itemType === "motion-graphics") {
+      await invokeMotionGraphicsStateMachine(requestId, jobPayload);
+    } else if (requestType === "FREE-TRIAL") {
     const freeTrial = Number(profileItem.free_trial || 0);
     if (!(freeTrial > 0)) {
       return response(402, { error: "Akses Tester sudah terpakai", error_code: "FREE_TRIAL_UNAVAILABLE" });
@@ -545,6 +562,7 @@ exports.handlePostResource = async (event) => {
     userEmail,
     requestType,
     pricing_type: pricing.item.type,
+    pricing_prompt: pricing.item.prompt,
     prompt,
     videoQuality,
     aspectRatio,
@@ -572,7 +590,11 @@ exports.handlePostResource = async (event) => {
   }
 
   try {
-    if (requestType === "FREE-TRIAL") {
+
+    if (pricing.item.type === "motion_graphic" || requestType === "MOTION_GRAPHICS" || requestType === "MOTION-GRAPHICS" || body.itemType === "motion-graphics") {
+      console.log("=== ROUTING TO MOTION GRAPHICS STATE MACHINE ===", JSON.stringify(jobPayload, null, 2));
+      await invokeMotionGraphicsStateMachine(requestId, jobPayload);
+    } else if (requestType === "FREE-TRIAL") {
       await invokeFreeTrialWorker(requestId, jobPayload);
     } else if (GENERATION_BACKEND === "comfyui") {
       await invokeComfyUI(requestId, jobPayload);

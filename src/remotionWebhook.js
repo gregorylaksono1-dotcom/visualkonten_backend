@@ -39,6 +39,8 @@ exports.handler = async (event) => {
           
           if (customData.originalUrl) {
             finalResultUrl = customData.originalUrl;
+          } else {
+            finalResultUrl = `https://${customData.originalBucket}.s3.${process.env.AWS_REGION || "ap-southeast-1"}.amazonaws.com/${customData.originalKey}`;
           }
         } catch (copyErr) {
           console.error("[RemotionWebhook] Failed to copy S3 object:", copyErr);

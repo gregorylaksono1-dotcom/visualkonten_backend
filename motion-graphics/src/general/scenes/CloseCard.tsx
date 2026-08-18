@@ -4,6 +4,8 @@ import { Props } from "../schema";
 import { getMoodConfig, sanitizeText, readableTextColor } from "../theme";
 import { getFeatureIcon } from "./icons";
 import { FitText } from "./FitText";
+import { KineticText } from "./KineticText";
+import { SceneDecor } from "./SceneDecor";
 
 // Momen 2 (padat/ramai): features + offer + cta digabung dalam 1 end-card.
 export const CloseCard: React.FC<{
@@ -39,10 +41,11 @@ export const CloseCard: React.FC<{
         background: `radial-gradient(ellipse at center, ${p.accent}22 0%, transparent 62%)`,
         pointerEvents: "none", opacity: interpolate(frame, [0, 12], [0, 1], { extrapolateRight: "clamp" }),
       }} />
+      <SceneDecor palette={p} />
 
       {/* Chips fitur (ramai, wrap) */}
       {items.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 14, width: "100%" }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 14, width: "100%" }}>
           {items.map((it: string, i: number) => {
             const spr = spring({ fps, frame: frame - i * 5, config: { damping: 14 } });
             return (
@@ -61,7 +64,7 @@ export const CloseCard: React.FC<{
 
       {/* Offer besar */}
       {offerOn && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, transform: `scale(${spring({ fps, frame: frame - 8, config: { damping: 12 } })})` }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, transform: `scale(${spring({ fps, frame: frame - 8, config: { damping: 12 } })})` }}>
           {offerBadge && (
             <div style={{ background: p.accent, color: readableTextColor(p.accent, p), fontFamily: "Poppins, sans-serif", fontWeight: 800, fontSize: 26, padding: "8px 20px", borderRadius: 100 }}>
               {offerBadge}
@@ -74,13 +77,16 @@ export const CloseCard: React.FC<{
 
       {/* CTA headline (kalau tak ada offer) */}
       {ctaHeadline && !offerOn && (
-        <FitText text={ctaHeadline} maxFontSize={66 * mood.fontScale} maxBoxWidth={width * 0.86} maxLines={2}
-          fontFamily="Poppins, sans-serif" fontWeight={900} style={{ color: p.ink, textAlign: "center", lineHeight: 1.05 }} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <KineticText text={ctaHeadline} maxFontSize={68 * mood.fontScale} maxBoxWidth={width * 0.86} maxLines={2}
+            fontFamily="Poppins, sans-serif" fontWeight={900} color={p.ink} underline={p.accent} />
+        </div>
       )}
 
       {/* Tombol CTA */}
       {ctaButton && (
         <div style={{
+          position: "relative", zIndex: 1,
           background: p.accent, borderRadius: 100, padding: "20px 52px", boxShadow: `0 20px 40px ${p.accent}70`,
           transform: `scale(${spring({ fps, frame: frame - 14, config: { damping: 12 } }) + pulse})`,
         }}>
@@ -90,7 +96,7 @@ export const CloseCard: React.FC<{
       )}
 
       {ctaHandle && (
-        <div style={{ fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 32 * mood.fontScale, color: p.ink, opacity: interpolate(spring({ fps, frame: frame - 18 }), [0, 1], [0, 0.85]) }}>
+        <div style={{ position: "relative", zIndex: 1, fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 32 * mood.fontScale, color: p.ink, opacity: interpolate(spring({ fps, frame: frame - 18 }), [0, 1], [0, 0.85]) }}>
           {ctaHandle}
         </div>
       )}

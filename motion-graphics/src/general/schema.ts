@@ -25,6 +25,9 @@ export const propsSchema = z.object({
     image_subject: z.enum(["product", "person", "group", "venue", "logo"]).nullable().default(null),
     image_layout: z.enum(["cutout_hero", "framed_portrait", "backdrop"]).nullable().default(null),
     image_is_cutout: z.boolean().default(true),
+    // Sinyal buat pipeline backend: true = jalankan background removal (cutout produk fisik);
+    // false = JANGAN (produk digital/cover/thumbnail, foto orang/venue, logo).
+    background_removal: z.boolean().optional(),
     emblem_glyph: Glyph.nullable().default(null),
     tagline: z.string().default(""),
   }),
@@ -42,7 +45,7 @@ export const propsSchema = z.object({
     asset: z.string().nullable().default(null),
   }),
   scenes: z.array(z.object({
-    id: z.enum(["hook", "reveal", "features", "offer", "cta"]),
+    id: z.enum(["hook", "reveal", "lifestyle", "features", "offer", "cta"]),
     enabled: z.boolean(),
     start_sec: z.number(),
     end_sec: z.number(),
@@ -61,6 +64,12 @@ export const propsSchema = z.object({
     note: z.string().optional(),
     button: z.string().optional(),
     handle: z.string().optional(),
+    // scene "lifestyle" (b-roll AI 1 gambar di tengah timeline):
+    image_prompt: z.string().optional(),           // prompt generator (LLM yang tulis)
+    gen_mode: z.enum(["i2i", "t2i"]).optional(),    // produk → i2i (kondisikan foto produk); announcement → t2i
+    condition_on: z.string().nullable().optional(), // "product_image" utk i2i
+    imageUrl: z.string().nullable().optional(),     // hasil gen, di-inject backend
+    caption: z.string().optional(),                 // teks kinetik pendek di atas gambar
   })),
   music: z.object({
     provider: z.string().default("gemini_lyria"),

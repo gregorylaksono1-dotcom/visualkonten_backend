@@ -433,22 +433,22 @@ const handleSubmission = async (event) => {
       }
 
       if (preview) {
-        console.log(`[Worker] Running in Preview mode. Generating all scene and talent images...`);
-        const { generatePreviewAssets } = require("./core/previewImageHelper");
-        await generatePreviewAssets({
+        console.log(`[Worker] Running in Preview mode. Triggering State Machine to generate preview assets...`);
+        const { triggerStateMachine } = require("./core/sfnOrchestrator");
+        await triggerStateMachine({
           jobId,
           userEmail,
           userId: event.userId,
-          currentS3ImageUrls,
+          currentS3ImageUrls: currentS3ImageUrls,
           llmResponse,
           finalJobPrompt,
           aspectRatio,
-          S3_RESOURCE_BUCKET,
-          dynamo,
-          s3: s3Client,
-          USER_REQUEST_TABLE,
           requestType,
-          startTime: submissionStartTime
+          pricing_type: existingJob.pricing_type,
+          audio: event.audio || existingJob.audio,
+          audio_duration: event.audio_duration || existingJob.audio_duration,
+          previewAssets: existingJob.preview_assets || {},
+          preview: true
         });
         await sendTelegramMessage(`user "${userEmail}" melakukan generasi preview ${requestType}`).catch(console.error);
         return;
@@ -458,21 +458,32 @@ const handleSubmission = async (event) => {
         try {
           console.log(`[Worker] Starting KIE.ai Step Function for job ${jobId}`);
           await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
-          const { triggerStateMachine } = require("./core/sfnOrchestrator");
-          await triggerStateMachine({
-            jobId,
-            userEmail,
-            userId: event.userId,
-            currentS3ImageUrls,
-            llmResponse,
-            finalJobPrompt,
-            aspectRatio,
-            requestType,
-            pricing_type: event.pricing_type,
-            audio: existingJob.audio,
-            audio_duration: existingJob.audio_duration
-          });
-
+          try {
+            const { triggerStateMachine } = require("./core/sfnOrchestrator");
+            console.log(`[Worker] Attempting to start SFN execution for job ${jobId}`);
+            await triggerStateMachine({
+              jobId,
+              userEmail: event.userEmail || existingJob.user_email,
+              userId: event.userId,
+              currentS3ImageUrls,
+              llmResponse: existingJob.llm_response,
+              finalJobPrompt,
+              aspectRatio: event.aspectRatio || existingJob.aspect_ratio,
+              requestType,
+              pricing_type: event.pricing_type,
+              audio: existingJob.audio || null,
+              audio_duration: existingJob.audio_duration || null,
+              previewAssets: {
+                generated_image_talent: existingJob.generated_image_talent || null,
+                generated_scenes: existingJob.generated_scenes || []
+              },
+              preview: false
+            });
+            console.log(`[Worker] Job ${jobId} successfully handed over to Step Functions.`);
+          } catch (err) {
+            console.error("[Worker] Process error:", err);
+            await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+          }
         } catch (e) {
           console.error("[Worker] Process error:", e);
           await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: e.message });
@@ -501,6 +512,8 @@ exports.handler = async (event) => {
         return await sfnOrchestrator.submitSceneVideo(event);
       case "mergeVideoScenes":
         return await sfnOrchestrator.mergeVideoScenes(event);
+      case "updateStatusPreview":
+        return await sfnOrchestrator.updateStatusPreview(event);
       default:
         throw new Error(`Unknown step function step: ${event.step}`);
     }

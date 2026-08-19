@@ -24,17 +24,15 @@ const SCENE_TRANSITIONS: Record<string, TransitionType> = {
 const FALLBACK_TRANSITIONS: TransitionType[] = ["fade", "slideUp", "zoomIn", "wipe", "slideRight", "flip"];
 
 export const MotionGeneral: React.FC<Props> = (props) => {
-  // Validate props at runtime to ensure safety
+  // Validate props at runtime to ensure safety. safeParse → tidak pernah throw;
+  // palette SELALU di-resolve (mencegah crash Background/Hook baca theme.palette undefined).
   const safeProps = useMemo(() => {
-    try {
-      const parsed = propsSchema.parse(props);
-      const { resolvePalette } = require("./theme");
-      parsed.theme.palette = resolvePalette(parsed.theme);
-      return parsed;
-    } catch (e) {
-      console.warn("Props validation failed", e);
-      return props; // fallback to raw props if validation fails but try to continue
-    }
+    const { resolvePalette } = require("./theme");
+    const parsed = propsSchema.safeParse(props);
+    const data: any = parsed.success ? parsed.data : props;
+    if (!parsed.success) console.warn("Props validation failed (fallback)", parsed.error?.issues);
+    if (data && data.theme) data.theme.palette = resolvePalette(data.theme);
+    return data;
   }, [props]);
 
   const { fps, durationInFrames } = useVideoConfig();

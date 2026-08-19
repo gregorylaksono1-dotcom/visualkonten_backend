@@ -17,6 +17,7 @@ const DEFAULT_TALENT_PORTRAIT_PROMPT =
 
 function resolveTalentImageNegative(llmResponse) {
   return (
+    String(llmResponse?.locks?.talent?.negative_image_prompt || "").trim() ||
     String(llmResponse?.talent_identity?.image_negative_avoid || "").trim() ||
     String(llmResponse?.meta?.image_generation?.anti_studio_negative || "").trim() ||
     DEFAULT_ANTI_STUDIO_NEGATIVE
@@ -34,6 +35,11 @@ function hasTalentAppealPhrase(text) {
 }
 
 function buildTalentPortraitPrompt(llmResponse) {
+  const lockTalent = llmResponse?.locks?.talent || {};
+  if (lockTalent.image_prompt) {
+    return appendAvoidNegative(lockTalent.image_prompt, resolveTalentImageNegative(llmResponse));
+  }
+
   const tid = llmResponse?.talent_identity || {};
   const parts = [];
   if (tid.prompt) parts.push(tid.prompt);
@@ -106,7 +112,9 @@ async function generatePreviewAssets(params) {
     size = "1024x1024";
   }
 
-  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S";
+  const standardTypes = ["UGC-P", "UGC-S", "FREE-TRIAL", "PRODUCT-CINEMATIC", "PRODUCT-CINEMATIK"];
+  const isTemplateDriven = !standardTypes.includes(String(requestType).toUpperCase());
+  const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || isTemplateDriven;
   const scenes = llmResponse.scene || llmResponse.scenes || [];
   if (!Array.isArray(scenes) || scenes.length === 0) {
     throw new Error("No scenes found in LLM response for preview generation.");
@@ -120,28 +128,36 @@ async function generatePreviewAssets(params) {
   let talentS3Key = null;
 
   if (isUgcMode && requestType !== "FREE-TRIAL") {
-    const talentPrompt = buildTalentPortraitPrompt(llmResponse);
-    console.log(`[PIPELINE_LOG] [IMAGE_LOCK] Generating lock image for: talent`);
-    console.log(`[PreviewHelper] Generating talent image with prompt: "${talentPrompt.slice(0, 60)}..."`);
-    const { buffer: talentBuffer, fallbackUrl: talentFallbackUrl } = await callOpenAIImageEdit({
-      apiKey,
-      prompt: talentPrompt,
-      size,
-      referenceUrls: currentS3ImageUrls
-    });
+    const lockTalent = llmResponse?.locks?.talent || {};
+    const lockType = lockTalent.type || "generated_reference";
 
-    talentS3Key = `${folder}/${userId || "anonymous"}/${jobId}_talent.png`;
+    if (lockType === "provided_reference") {
+      console.log(`[PreviewHelper] Talent lock type is provided_reference. Using uploaded image as talent reference.`);
+      generatedTalentImageUrl = currentS3ImageUrls[0] || null;
+    } else {
+      const talentPrompt = buildTalentPortraitPrompt(llmResponse);
+      console.log(`[PIPELINE_LOG] [IMAGE_LOCK] Generating lock image for: talent`);
+      console.log(`[PreviewHelper] Generating talent image with prompt: "${talentPrompt.slice(0, 60)}..."`);
+      const { buffer: talentBuffer, fallbackUrl: talentFallbackUrl } = await callOpenAIImageEdit({
+        apiKey,
+        prompt: talentPrompt,
+        size,
+        referenceUrls: currentS3ImageUrls
+      });
 
-    await s3.send(new PutObjectCommand({
-      Bucket: S3_RESOURCE_BUCKET,
-      Key: talentS3Key,
-      Body: talentBuffer,
-      ContentType: "image/png"
-    }));
+      talentS3Key = `${folder}/${userId || "anonymous"}/${jobId}_talent.png`;
 
-    const talentImgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: talentS3Key });
-    generatedTalentImageUrl = talentFallbackUrl || (await getSignedUrl(s3, talentImgCmd, { expiresIn: 3600 }));
-    console.log(`[PreviewHelper] Talent image generated successfully. URL: ${generatedTalentImageUrl}`);
+      await s3.send(new PutObjectCommand({
+        Bucket: S3_RESOURCE_BUCKET,
+        Key: talentS3Key,
+        Body: talentBuffer,
+        ContentType: "image/png"
+      }));
+
+      const talentImgCmd = new GetObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: talentS3Key });
+      generatedTalentImageUrl = talentFallbackUrl || (await getSignedUrl(s3, talentImgCmd, { expiresIn: 3600 }));
+      console.log(`[PreviewHelper] Talent image generated successfully. URL: ${generatedTalentImageUrl}`);
+    }
   }
 
   // 2. Generate keyframe images for all scenes

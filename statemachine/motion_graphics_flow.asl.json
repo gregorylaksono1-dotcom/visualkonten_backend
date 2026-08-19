@@ -22,16 +22,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "ParallelProcess",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
-      ]
+      "Next": "ParallelProcess"
     },
     "ParallelProcess": {
       "Type": "Parallel",
@@ -137,15 +128,6 @@
             }
           }
         }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
       ]
     },
     "TriggerRemotionRender": {
@@ -175,16 +157,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "CheckPostProduction",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
-      ]
+      "Next": "CheckPostProduction"
     },
     "CheckPostProduction": {
       "Type": "Choice",
@@ -222,16 +195,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "UpdateStatusCompleted",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
-      ]
+      "Next": "UpdateStatusCompleted"
     },
     "UpdateStatusCompleted": {
       "Type": "Task",
@@ -262,16 +226,7 @@
           }
         }
       },
-      "End": true,
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
-      ]
+      "End": true
     },
     "GenerateLifestyleImage": {
       "Type": "Task",
@@ -297,32 +252,7 @@
           "BackoffRate": 2
         }
       ],
-      "Next": "TriggerRemotionRender",
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "ResultPath": "$.errorDetails",
-          "Next": "HandleFailure"
-        }
-      ]
-    },
-    "HandleFailure": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "Parameters": {
-        "FunctionName": "${MotionGraphicsErrorHandlerFunction}",
-        "Payload": {
-          "originalInput.$": "$.originalInput",
-          "errorDetails.$": "$.errorDetails"
-        }
-      },
-      "Next": "FailState"
-    },
-    "FailState": {
-      "Type": "Fail",
-      "Cause": "Motion Graphics Pipeline Failed"
+      "Next": "TriggerRemotionRender"
     }
   }
 }

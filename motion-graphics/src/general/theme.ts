@@ -8,6 +8,8 @@ export const getMoodConfig = (mood: string) => {
     case "playful":
     case "upbeat":
       return { speedMultiplier: 1.3, contrast: 1, radius: 32, fontScale: 1.1, glowOpacity: 0.3 };
+    case "energetic":
+      return { speedMultiplier: 1.4, contrast: 1.15, radius: 18, fontScale: 1.08, glowOpacity: 0.28 };
     case "techy":
       return { speedMultiplier: 1.1, contrast: 1.1, radius: 8, fontScale: 1, glowOpacity: 0.2 };
     case "fresh":
@@ -84,7 +86,7 @@ export const sanitizeText = (t?: string | null): string => {
 };
 
 export const resolvePalette = (theme: Props["theme"]): NonNullable<Props["theme"]["palette"]> => {
-  if (theme.palette) return theme.palette;
+  if (theme.palette && theme.palette.brandB) return theme.palette as NonNullable<Props["theme"]["palette"]>;
   if (theme.palette_id && palettePool[theme.palette_id]) return palettePool[theme.palette_id];
   // Fallback anti-seragam: kalau tak ada palette_id valid, rotasi deterministik dari pool
   // pakai bg_style+mood sebagai seed (⛔ jangan selalu biru default).

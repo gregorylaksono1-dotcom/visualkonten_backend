@@ -1103,7 +1103,10 @@ Resources:
       Environment:
         Variables:
           SSM_PREFIX: !Ref ConfigSsmPath
+          S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
       Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -1270,7 +1273,7 @@ Resources:
           - states:DescribeExecution
           Resource:
           - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-VideoGeneration${EnvironmentSuffix}:*
-          - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:MotionGraphicsStateMachine-${EnvironmentSuffix}:*
+          - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-MotionGraphics${EnvironmentSuffix}:*
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME:
@@ -1324,7 +1327,7 @@ Resources:
       CodeUri: src-motion-graphics/
       Handler: handlers/llm.handler
       Runtime: nodejs22.x
-      Timeout: 60
+      Timeout: 300
       Architectures:
         - x86_64
       Policies:
@@ -1378,6 +1381,20 @@ Resources:
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+      Events:
+        StepFunctionFailure:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.states
+              detail-type:
+                - Step Functions Execution Status Change
+              detail:
+                status:
+                  - FAILED
+                stateMachineArn:
+                  - !Ref MotionGraphicsStateMachine
     Metadata:
       SamResourceId: MotionGraphicsErrorHandlerFunction
       BuildMethod: esbuild
@@ -1620,7 +1637,7 @@ Outputs:
     Description: ARN of the Step Functions Video Generation State Machine
     Value: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
 
-# sam build && sam deploy --config-env production --profile production
+# sam build && sam deploy --config-env production --profile production --no-confirm-changeset 
 
 # check log di dev
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-dev --region ap-southeast-1 --tail

@@ -42,6 +42,7 @@ const mapUserRequestUsageRow = (item) => ({
   request_type: item.request_type,
   resource_family: item.resource_family,
   credit_amount: item.credit_amount,
+  preview_credit_amount: item.preview_credit_amount,
   status: item.status,
   created_at: item.created_at,
   s3_keys: item.s3_keys ?? null,
@@ -168,9 +169,7 @@ const getJakartaISOString = (date = new Date()) => {
 };
 
 const pickEnabledPaymentsByNominal = (nominal) => {
-  if (nominal < 20000) return ["shopeepay", "gopay", "qris"];
-  if (nominal > 1000000) return ["credit_card", "bca_va", "bni_va", "mandiri_clickpay"];
-  return ["bca_va", "gopay", "qris", "shopeepay", "echannel"];
+  return ["gopay", "qris"];
 };
 
 const buildCreditStatusFilterParts = (statusGroup) => {

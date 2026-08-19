@@ -18,7 +18,9 @@ const MAX_EXP = 4;
 
 export const MotionCV: React.FC<CvProps> = (props) => {
   const safe = useMemo(() => {
-    try { return cvSchema.parse(props); } catch (e) { console.warn("CV props invalid", e); return props; }
+    const parsed = cvSchema.safeParse(props);
+    if (!parsed.success) console.warn("CV props invalid (fallback)", parsed.error?.issues);
+    return (parsed.success ? parsed.data : props) as CvProps;
   }, [props]);
 
   const { fps, durationInFrames } = useVideoConfig();

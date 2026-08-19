@@ -12,15 +12,12 @@ import { SceneTransition } from "./scenes/SceneTransition";
 // timing per-scene diabaikan — template membagi durasi jadi 2 bagian.
 export const MotionGeneralShort: React.FC<Props> = (props) => {
   const safeProps = useMemo(() => {
-    try {
-      const parsed = propsSchema.parse(props);
-      const { resolvePalette } = require("./theme");
-      parsed.theme.palette = resolvePalette(parsed.theme);
-      return parsed;
-    } catch (e) {
-      console.warn("Props validation failed", e);
-      return props;
-    }
+    const { resolvePalette } = require("./theme");
+    const parsed = propsSchema.safeParse(props);
+    const data: any = parsed.success ? parsed.data : props;
+    if (!parsed.success) console.warn("Props validation failed (fallback)", parsed.error?.issues);
+    if (data && data.theme) data.theme.palette = resolvePalette(data.theme);
+    return data;
   }, [props]);
 
   const { fps, durationInFrames } = useVideoConfig();

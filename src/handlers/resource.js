@@ -116,6 +116,13 @@ exports.handlePostResource = async (event) => {
             if (durAttr !== undefined) {
               finalAmount = typeof durAttr === 'object' ? Number(durAttr.price || 0) : Number(durAttr);
             }
+          } else if (pricing.item.type === "motion_graphic" || requestTypeUpper === "MOTION_GRAPHICS" || requestTypeUpper === "MOTION-GRAPHICS") {
+            if (isFreeTrial && requestItem.free_trial === 1 && parsedAttr["freetrial"] !== undefined) {
+               finalAmount = Number(parsedAttr["freetrial"]);
+               isFreeTrialUsed = true;
+            } else if (parsedAttr["price"] !== undefined) {
+               finalAmount = Number(parsedAttr["price"]);
+            }
           } else {
             let valToUse;
             if (isFreeTrial && requestItem.free_trial === 1 && parsedAttr["freetrial"] !== undefined) {
@@ -145,15 +152,22 @@ exports.handlePostResource = async (event) => {
       }
 
       const now = getJakartaISOString();
+      const isPreviewReq = body.preview === true || String(body.preview).toLowerCase() === "true";
       const putItem = {
         ...requestItem,
-        status: "VIDEO GENERATING",
-        credit_amount: finalAmount,
-        preview: 0,
+        status: isPreviewReq ? "PREVIEW" : "VIDEO GENERATING",
+        preview: isPreviewReq ? 1 : 0,
         updated_at: now,
         video_gen_start_at: now,
         ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
       };
+      
+      if (isPreviewReq) {
+        putItem.preview_credit_amount = (Number(requestItem.preview_credit_amount) || 0) + finalAmount;
+      } else {
+        putItem.credit_amount = (Number(requestItem.credit_amount) || 0) + finalAmount;
+      }
+      
       delete putItem.result_url;
 
       // Handle custom user edits to llm_response (motion prompts, tts scripts)
@@ -416,8 +430,8 @@ exports.handlePostResource = async (event) => {
          finalAmount = Number(parsedAttr["freetrial"]);
          appliedFreeTrialPricing = true;
          isFreeTrialUsed = true;
-      } else if (parsedAttr["main"] !== undefined) {
-         finalAmount = Number(parsedAttr["main"]);
+      } else if (parsedAttr["price"] !== undefined) {
+         finalAmount = Number(parsedAttr["price"]);
       }
     }
   } else if (pricing.item.attr) {
@@ -532,9 +546,11 @@ exports.handlePostResource = async (event) => {
   }
 
   const putItem = {
-    uuid: requestId, user_email: userEmail, user_id: userId, prompt, request_type: requestType,
-    resource_family: resourceFamily, status: "SUBMITTING", credit_amount: finalAmount,
-    created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
+    uuid: requestId, user_id: String(userId), user_email: userEmail,
+    request_type: requestType, prompt, 
+    resource_family: resourceFamily, status: "SUBMITTING", 
+    ...(isPreview ? { preview_credit_amount: finalAmount } : { credit_amount: finalAmount }),
+    pricing_type: pricing.item.type, created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
     ugc_mode: body.ugc_mode || null,
     store_type: body.store_type || null,
     story_type: body.story_type || null,

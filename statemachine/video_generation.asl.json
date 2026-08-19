@@ -107,7 +107,40 @@
         }
       },
       "ResultPath": "$.sceneImageResults",
-      "Next": "GenerateSceneVideos"
+      "Next": "CheckAfterImages"
+    },
+
+    "CheckAfterImages": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.preview",
+          "BooleanEquals": true,
+          "Next": "UpdateStatusPreview"
+        }
+      ],
+      "Default": "GenerateSceneVideos"
+    },
+
+    "UpdateStatusPreview": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ComfyUIWorkerFunctionArn}",
+        "Payload": {
+          "step": "updateStatusPreview",
+          "data.$": "$"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "End": true
     },
 
     "GenerateSceneVideos": {

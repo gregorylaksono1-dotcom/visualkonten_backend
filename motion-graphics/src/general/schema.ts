@@ -15,8 +15,9 @@ export const propsSchema = z.object({
   theme: z.object({
     palette: z.object({ brandA: z.string(), brandB: z.string(), accent: z.string(), ink: z.string(), brandC: z.string().optional() }).optional(),
     palette_id: z.string().nullable().default(null),
-    bg_style: z.enum(["aurora", "mesh", "spotlight", "bokeh_night", "waves", "radial_burst", "geometric", "duotone", "starfield", "confetti_field"]).default("aurora"),
-    mood: z.enum(["fresh", "premium", "playful", "techy", "elegant", "upbeat"]),
+    bg_style: z.enum(["aurora", "mesh", "spotlight", "bokeh_night", "waves", "radial_burst", "geometric", "duotone", "starfield", "confetti_field"]).catch("aurora").default("aurora"),
+    // .catch → mood tak dikenal (mis. "energetic") jatuh ke "fresh", ⛔ tidak throw / crash.
+    mood: z.enum(["fresh", "premium", "playful", "techy", "elegant", "upbeat", "energetic"]).catch("fresh").default("fresh"),
   }),
   product: z.object({
     name: z.string(),

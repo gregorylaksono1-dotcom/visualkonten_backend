@@ -33,7 +33,9 @@ async function triggerStateMachine({
   requestType,
   pricing_type,
   audio,
-  audio_duration
+  audio_duration,
+  previewAssets,
+  preview
 }) {
   if (!STATE_MACHINE_ARN) {
     throw new Error("STATE_MACHINE_ARN environment variable is not set.");
@@ -50,7 +52,9 @@ async function triggerStateMachine({
     finalJobPrompt,
     aspectRatio: aspectRatio || "9:16",
     audio: audio || null,
-    audio_duration: audio_duration || null
+    audio_duration: audio_duration || null,
+    previewAssets: previewAssets || {},
+    preview: preview || false
   };
 
   console.log(`[SFN Orchestrator] Starting Step Function execution for Job ${jobId}`);
@@ -126,12 +130,14 @@ async function prepareJobData(payload) {
   console.log(`[SFN Orchestrator] Preparing job data for ${jobId}`);
 
   let generated_scenes = [];
+  let generated_image_talent = null;
   try {
     const dbResult = await dynamo.send(new GetCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail }
     }));
     generated_scenes = dbResult.Item?.generated_scenes || [];
+    generated_image_talent = dbResult.Item?.generated_image_talent || null;
   } catch (err) {
     console.error(`[SFN Orchestrator] Failed to fetch existing job for ${jobId}`, err);
   }
@@ -155,12 +161,20 @@ async function prepareJobData(payload) {
           taskId: ""
         });
       } else if (lockData.type === "generated_reference" || lockData.type === "generate_from_description") {
+        let isFinished = false;
+        let lockS3Key = "";
+        if (id === "talent" && generated_image_talent) {
+           isFinished = true;
+           lockS3Key = generated_image_talent;
+           console.log(`[SFN Orchestrator] Reusing talent lock image from preview: ${lockS3Key}`);
+        }
+
         locks.push({
           id,
           prompt: lockData.image_prompt || "",
           negative_prompt: lockData.negative_image_prompt || "",
-          s3key: "",
-          isImageFinished: false,
+          s3key: lockS3Key,
+          isImageFinished: isFinished,
           taskId: ""
         });
       }
@@ -294,7 +308,8 @@ async function prepareJobData(payload) {
     aspect_ratio: aspectRatio || "9:16",
     request_type: requestType,
     llm_response: llmResponse,
-    pricing_post_production: pricingPostProduction
+    pricing_post_production: pricingPostProduction,
+    preview: payload.data.preview || false
   };
 }
 
@@ -773,6 +788,72 @@ async function saveTaskToken(jobId, userEmail, key, taskToken) {
   }
 }
 
+async function updateStatusPreview(payload) {
+  const { data } = payload;
+  const { jobId, userEmail, lockResults, sceneImageResults } = data;
+
+  console.log(`[SFN Orchestrator] updateStatusPreview for ${jobId}`);
+
+  let generated_image_talent = null;
+  if (Array.isArray(lockResults)) {
+    const talentLock = lockResults.find(l => l && l.id === "talent");
+    if (talentLock && talentLock.s3key) {
+      generated_image_talent = talentLock.s3key;
+    }
+  }
+
+  const generated_scenes = [];
+  if (Array.isArray(sceneImageResults)) {
+    for (const res of sceneImageResults) {
+      if (res && res.id) {
+        generated_scenes.push({
+          scene_id: res.id,
+          s3_key: res.s3key || null,
+          url: res.url || null
+        });
+      }
+    }
+  }
+
+  const newImageKeys = [];
+  if (generated_image_talent) newImageKeys.push(generated_image_talent);
+  generated_scenes.forEach(gs => {
+    if (gs.s3_key) newImageKeys.push(gs.s3_key);
+  });
+
+  const updateExpr = ["generated_scenes = :genScenes", "#s = :status", "updated_at = :now"];
+  const exprValues = {
+    ":genScenes": generated_scenes,
+    ":status": "PREVIEW",
+    ":now": getJakartaISOString()
+  };
+
+  if (generated_image_talent) {
+    updateExpr.push("generated_image_talent = :genTalent");
+    updateExpr.push("generated_image = :genTalent"); // set main thumbnail to talent
+    exprValues[":genTalent"] = generated_image_talent;
+  } else if (generated_scenes.length > 0 && generated_scenes[0].s3_key) {
+    updateExpr.push("generated_image = :genImg");
+    exprValues[":genImg"] = generated_scenes[0].s3_key;
+  }
+
+  if (newImageKeys.length > 0) {
+    updateExpr.push("s3_keys = list_append(if_not_exists(s3_keys, :empty_list), :newKeys)");
+    exprValues[":empty_list"] = [];
+    exprValues[":newKeys"] = newImageKeys;
+  }
+
+  await dynamo.send(new UpdateCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { uuid: jobId, user_email: userEmail },
+    UpdateExpression: "SET " + updateExpr.join(", "),
+    ExpressionAttributeNames: { "#s": "status" },
+    ExpressionAttributeValues: exprValues
+  }));
+
+  return { success: true, status: "PREVIEW" };
+}
+
 module.exports = {
   triggerStateMachine,
   triggerManualRedrive,
@@ -781,5 +862,6 @@ module.exports = {
   submitSceneImage,
   submitSceneVideo,
   mergeVideoScenes,
-  saveTaskToken
+  saveTaskToken,
+  updateStatusPreview
 };

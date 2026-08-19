@@ -156,7 +156,8 @@ function parseStandardLlmResponse(raw) {
     }
   } catch (err) {}
 
-  throw new Error("Gagal memparsing JSON response dari LLM");
+  console.error("LLM JSON Parse Error. Raw Response:", original);
+  throw new Error(`Gagal memparsing JSON response dari LLM. Response: ${original.substring(0, 1000)}`);
 }
 
 module.exports = {

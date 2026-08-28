@@ -228,13 +228,10 @@ const handlePolling = async () => {
   }
 };
 
-const handleSubmission = async (event) => {
-  const submissionStartTime = Date.now();
-  const { jobId, userEmail, requestType, prompt, videoQuality, aspectRatio, s3ImageUrls, preview } = event;
-
-  let finalJobPrompt = prompt;
-  let currentS3ImageUrls = Array.isArray(s3ImageUrls) ? s3ImageUrls : (s3ImageUrls ? [s3ImageUrls] : []);
-
+const generateLLMPrompt = async (event) => {
+  const data = event.data || event;
+  const { jobId, userEmail, requestType, currentS3ImageUrls, prompt, preview } = data;
+  
   let existingJob = {};
   try {
     const jobGet = await dynamo.send(new GetCommand({
@@ -246,33 +243,6 @@ const handleSubmission = async (event) => {
     console.error("[Worker] Error fetching existing request:", err.message);
   }
 
-  // ─── Key Routing for Custom Handlers ──────────────────────────────────────────
-
-  if (requestType === "MOTION_CONTROL") {
-    console.log(`[Worker] Starting MOTION_CONTROL task submission for job ${jobId}`);
-    try {
-      const { submitMotionControlTask } = require("./prompt/motionControl");
-      await submitMotionControlTask({
-        jobId,
-        userEmail,
-        userId: event.userId,
-        s3ImageUrls,
-        videoRefKey: event.video_ref_key || existingJob.video_ref_key,
-        duration: event.duration_seconds || 5,
-        dynamo,
-        USER_REQUEST_TABLE,
-        S3_RESOURCE_BUCKET
-      });
-      await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
-      return;
-    } catch (err) {
-      console.error(`[Worker] Error executing motion control handler for job ${jobId}:`, err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
-      return;
-    }
-  }
-
-  // Check for dynamic prompt template in database (pricing table)
   const standardTypes = ["UGC-P", "UGC-S", "FREE-TRIAL", "PRODUCT-CINEMATIC", "PRODUCT-CINEMATIK"];
   let templatePrompt = null;
   if (!standardTypes.includes(String(requestType).toUpperCase())) {
@@ -289,11 +259,11 @@ const handleSubmission = async (event) => {
         const llmResponse = await handleGenericTemplate({
           jobId,
           userEmail,
-          userId: event.userId,
+          userId: data.userId || existingJob.user_id,
           currentS3ImageUrls,
           prompt,
-          videoQuality,
-          aspectRatio,
+          videoQuality: data.videoQuality || existingJob.video_quality,
+          aspectRatio: data.aspectRatio || existingJob.aspect_ratio,
           S3_RESOURCE_BUCKET,
           dynamo,
           s3: s3Client,
@@ -304,34 +274,29 @@ const handleSubmission = async (event) => {
           template: templatePrompt
         });
         existingJob.llm_response = llmResponse;
-        console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}. Proceeding to state machine.`);
+        console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}.`);
       } catch (err) {
         console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
-        await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
-        
-        if (existingJob.credit_amount) {
-          const { refundUserCredit } = require("./services");
-          const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
-          await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
-        }
-        return;
+        await sendTelegramMessage(`${userEmail} error_llm ${err.message}`).catch(console.error);
+        throw err;
       }
     } else {
       console.log(`[Worker] Reusing existing llm_response for job ${jobId} (Type: ${requestType})`);
     }
   }
 
-
   const isUgcMode = requestType === "UGC-P" || requestType === "UGC-S" || requestType === "UGC-PRESENTER" || String(requestType).toUpperCase().startsWith("UGC-") || isTemplateDriven;
   const isProductCinematic = requestType === "PRODUCT-CINEMATIC" || requestType === "PRODUCT-CINEMATIK" || String(requestType).toUpperCase().includes("CINEMATIC") || String(requestType).toUpperCase().includes("CINEMATIK");
 
+  let finalJobPrompt = prompt;
+  
   if (isUgcMode || isProductCinematic) {
     try {
       console.log(`[Worker] Processing ${requestType} AI requirements for job ${jobId}`);
 
-      const storeType = event.store_type || "offline";
-      const sellingMode = event.selling_mode || "hard";
-      const videoDuration = event.video_duration || 15;
+      const storeType = data.store_type || "offline";
+      const sellingMode = data.selling_mode || "hard";
+      const videoDuration = data.video_duration || 15;
 
       let llmResponse = existingJob.llm_response;
       if (!llmResponse) {
@@ -386,8 +351,8 @@ const handleSubmission = async (event) => {
               }
               syncGenderFields(llmResponse);
               llmResponse.tts_global_config = buildTtsGlobalConfig(llmResponse, {
-                voiceSelectionMode: event.voice_selection_mode || llmResponse.meta?.voice_selection_mode,
-                preferredVoice: event.preferred_voice || llmResponse.meta?.preferred_voice,
+                voiceSelectionMode: data.voice_selection_mode || llmResponse.meta?.voice_selection_mode,
+                preferredVoice: data.preferred_voice || llmResponse.meta?.preferred_voice,
               });
               if (llmResponse.voiceover_script && llmResponse.tts_global_config?.voice_name) {
                 llmResponse.voiceover_script.voice_name = llmResponse.tts_global_config.voice_name;
@@ -422,77 +387,103 @@ const handleSubmission = async (event) => {
           error_message: reason,
           llm_reason: reason
         });
-
-        if (existingJob.credit_amount) {
-          const { refundUserCredit } = require("./services");
-          const isFreeTrialUsed = existingJob.request_type === "FREE-TRIAL";
-          await refundUserCredit(event.userId || existingJob.user_id, existingJob.credit_amount, isFreeTrialUsed);
-        }
+        
         await sendTelegramMessage(`${userEmail} error_llm ${reason}`).catch(console.error);
-        return;
-      }
-
-      if (preview) {
-        console.log(`[Worker] Running in Preview mode. Triggering State Machine to generate preview assets...`);
-        const { triggerStateMachine } = require("./core/sfnOrchestrator");
-        await triggerStateMachine({
-          jobId,
-          userEmail,
-          userId: event.userId,
-          currentS3ImageUrls: currentS3ImageUrls,
-          llmResponse,
-          finalJobPrompt,
-          aspectRatio,
-          requestType,
-          pricing_type: existingJob.pricing_type,
-          audio: event.audio || existingJob.audio,
-          audio_duration: event.audio_duration || existingJob.audio_duration,
-          previewAssets: existingJob.preview_assets || {},
-          preview: true
-        });
-        await sendTelegramMessage(`user "${userEmail}" melakukan generasi preview ${requestType}`).catch(console.error);
-        return;
-      }
-
-      if (llmResponse) {
-        try {
-          console.log(`[Worker] Starting KIE.ai Step Function for job ${jobId}`);
-          await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
-          try {
-            const { triggerStateMachine } = require("./core/sfnOrchestrator");
-            console.log(`[Worker] Attempting to start SFN execution for job ${jobId}`);
-            await triggerStateMachine({
-              jobId,
-              userEmail: event.userEmail || existingJob.user_email,
-              userId: event.userId,
-              currentS3ImageUrls,
-              llmResponse: existingJob.llm_response,
-              finalJobPrompt,
-              aspectRatio: event.aspectRatio || existingJob.aspect_ratio,
-              requestType,
-              pricing_type: event.pricing_type,
-              audio: existingJob.audio || null,
-              audio_duration: existingJob.audio_duration || null,
-              previewAssets: {
-                generated_image_talent: existingJob.generated_image_talent || null,
-                generated_scenes: existingJob.generated_scenes || []
-              },
-              preview: false
-            });
-            console.log(`[Worker] Job ${jobId} successfully handed over to Step Functions.`);
-          } catch (err) {
-            console.error("[Worker] Process error:", err);
-            await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+        
+        class LLMPolicyRejectionError extends Error {
+          constructor(msg) {
+            super(msg);
+            this.name = "LLMPolicyRejectionError";
           }
-        } catch (e) {
-          console.error("[Worker] Process error:", e);
-          await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: e.message });
         }
+        throw new LLMPolicyRejectionError(reason);
       }
+      
+      data.llmResponse = llmResponse;
+      data.finalJobPrompt = finalJobPrompt;
+
     } catch (err) {
       console.error("[Worker] AI processing error:", err);
-      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+      throw err;
     }
+  }
+
+  return data;
+};
+
+const handleSubmission = async (event) => {
+  const { jobId, userEmail, requestType, s3ImageUrls, preview } = event;
+
+  let currentS3ImageUrls = Array.isArray(s3ImageUrls) ? s3ImageUrls : (s3ImageUrls ? [s3ImageUrls] : []);
+
+  let existingJob = {};
+  try {
+    const jobGet = await dynamo.send(new GetCommand({
+      TableName: USER_REQUEST_TABLE,
+      Key: { uuid: jobId, user_email: userEmail }
+    }));
+    existingJob = jobGet.Item || {};
+  } catch (err) {
+    console.error("[Worker] Error fetching existing request:", err.message);
+  }
+
+  if (requestType === "MOTION_CONTROL") {
+    console.log(`[Worker] Starting MOTION_CONTROL task submission for job ${jobId}`);
+    try {
+      const { submitMotionControlTask } = require("./prompt/motionControl");
+      await submitMotionControlTask({
+        jobId,
+        userEmail,
+        userId: event.userId,
+        s3ImageUrls,
+        videoRefKey: event.video_ref_key || existingJob.video_ref_key,
+        duration: event.duration_seconds || 5,
+        dynamo,
+        USER_REQUEST_TABLE,
+        S3_RESOURCE_BUCKET
+      });
+      await sendTelegramMessage(`user "${userEmail}" melakukan generasi ${requestType}`).catch(console.error);
+      return;
+    } catch (err) {
+      console.error(`[Worker] Error executing motion control handler for job ${jobId}:`, err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
+      return;
+    }
+  }
+
+  try {
+    console.log(`[Worker] Starting KIE.ai Step Function for job ${jobId}`);
+    const actionDesc = preview ? "generasi preview" : "generasi";
+    await sendTelegramMessage(`user "${userEmail}" melakukan ${actionDesc} ${requestType}`).catch(console.error);
+    
+    const { triggerStateMachine } = require("./core/sfnOrchestrator");
+    await triggerStateMachine({
+      jobId,
+      userEmail: event.userEmail || existingJob.user_email,
+      userId: event.userId || existingJob.user_id,
+      currentS3ImageUrls,
+      prompt: event.prompt || existingJob.prompt,
+      videoQuality: event.videoQuality || existingJob.video_quality,
+      aspectRatio: event.aspectRatio || existingJob.aspect_ratio,
+      requestType,
+      pricing_type: event.pricing_type || existingJob.pricing_type,
+      audio: event.audio || existingJob.audio || null,
+      audio_duration: event.audio_duration || existingJob.audio_duration || null,
+      previewAssets: {
+        generated_image_talent: existingJob.generated_image_talent || null,
+        generated_scenes: existingJob.generated_scenes || []
+      },
+      preview: preview || false,
+      store_type: event.store_type || existingJob.store_type || "offline",
+      selling_mode: event.selling_mode || existingJob.selling_mode || "hard",
+      video_duration: event.video_duration || existingJob.video_duration || 15,
+      voice_selection_mode: event.voice_selection_mode || null,
+      preferred_voice: event.preferred_voice || null
+    });
+    console.log(`[Worker] Job ${jobId} successfully handed over to Step Functions.`);
+  } catch (err) {
+    console.error("[Worker] Process error:", err);
+    await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: err.message });
   }
 };
 
@@ -502,6 +493,8 @@ exports.handler = async (event) => {
     const sfnOrchestrator = require("./core/sfnOrchestrator");
     console.log(`[SFN Task] Router received step: ${event.step}`);
     switch (event.step) {
+      case "generateLLMPrompt":
+        return await generateLLMPrompt(event);
       case "prepareJobData":
         return await sfnOrchestrator.prepareJobData(event);
       case "submitLockImage":

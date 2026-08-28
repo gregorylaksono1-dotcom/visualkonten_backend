@@ -156,7 +156,11 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
 
     let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy -movflags +faststart ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
+      // amix automatically scales volume by 1/N (so 1/2 for 2 inputs).
+      // To get 20% bg (0.2) and 150% vo (1.5), we pre-multiply by 2:
+      // BG: 0.2 * 2 = 0.4
+      // VO: 1.5 * 2 = 3.0
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a]volume=0.4[bg];[1:a]volume=3.0[vo];[bg][vo]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
     }
 
     console.log(`[FFmpeg Merge] Running command: ${cmd}`);
@@ -243,14 +247,14 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
 /**
  * Submits a Flux-2 image generation task to Kie.ai
  */
-async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, referenceUrls, callbackBase, kieApiKey, taskToken, requestType }) {
+async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, referenceUrls, callbackBase, kieApiKey, taskToken, requestType, aspectRatio }) {
   const callbackBaseNormalized = callbackBase.endsWith("/") ? callbackBase.slice(0, -1) : callbackBase;
   let callBackUrl = `${callbackBaseNormalized}/images?request-id=${jobId}&type=${type}&id=${id}`;
   if (taskToken) {
     callBackUrl += `&taskToken=${encodeURIComponent(taskToken)}`;
   }
 
-  let resolvedAspectRatio = "9:16";
+  let resolvedAspectRatio = aspectRatio || "9:16";
   const hasImages = Array.isArray(referenceUrls) && referenceUrls.length > 0;
   
   const model = "nano-banana-2-lite";
@@ -288,7 +292,7 @@ async function submitKieImageTask({ jobId, id, type, prompt, negativePrompt, ref
 /**
  * Transition to Scene Image Phase
  */
-async function transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey) {
+async function transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey, jobData) {
   console.log(`[State Machine] Transitioning to Scene Image Phase for job ${jobId}`);
   const redis = getRedis();
   const redisKey = `build_queue_${jobId}`;
@@ -314,7 +318,8 @@ async function transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieA
       negativePrompt: scene.negative_prompt_image,
       referenceUrls,
       callbackBase,
-      kieApiKey
+      kieApiKey,
+      aspectRatio: jobData?.aspect_ratio
     });
     scene.imageTaskId = taskId;
   });
@@ -478,14 +483,15 @@ async function startStateMachine(params) {
         negativePrompt: item.negative_prompt,
         referenceUrls: [],
         callbackBase,
-        kieApiKey
+        kieApiKey,
+        aspectRatio: params.jobData?.aspect_ratio
       });
       item.taskId = taskId;
     }
     await redis.set(redisKey, JSON.stringify(buildQueue), { ex: 5400 });
   } else {
     console.log(`[State Machine] All locks are finished (or none defined). Transitioning to Scene Image Phase directly.`);
-    await transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey);
+    await transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey, params.jobData);
   }
 }
 
@@ -597,7 +603,7 @@ async function handleImageCallback({ jobId, type, id, resultUrl, dynamo, s3, USE
   if (type === "lock") {
     if (allLocksFinished) {
       console.log(`[State Machine Callback] All locks finished. Transitioning to Scene Image Phase.`);
-      await transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey);
+      await transitionToSceneImagePhase(jobId, buildQueue, callbackBase, kieApiKey, jobData);
     } else {
       console.log(`[State Machine Callback] Awaiting remaining locks...`);
     }

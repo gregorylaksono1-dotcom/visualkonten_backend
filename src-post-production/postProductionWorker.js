@@ -11,7 +11,7 @@ exports.handler = async (event, context) => {
   console.log("[PostProductionWorker] Received event:", JSON.stringify(event, null, 2));
 
   try {
-    const { jobId, userEmail, userId, llm_response, videoUrl, taskToken } = event;
+    const { jobId, userEmail, userId, llm_response, videoUrl, taskToken, aspect_ratio } = event;
 
     if (!videoUrl) {
       throw new Error("Missing videoUrl for post-production.");
@@ -138,7 +138,8 @@ exports.handler = async (event, context) => {
       composition: "PostProduction",
       inputProps: {
         videoUrl: finalVideoUrl,
-        post_production
+        post_production,
+        aspect_ratio
       },
       codec: "h264",
       imageFormat: "jpeg",

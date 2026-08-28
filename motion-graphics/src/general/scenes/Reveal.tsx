@@ -47,10 +47,13 @@ export const Reveal: React.FC<{
           <div
             style={{
               position: "relative",
-              width: width * 0.7,
-              height: height * 0.45,
-              borderRadius: 32,
+              width: width * 0.82,
+              maxHeight: height * 0.6,
+              borderRadius: 28,
               overflow: "hidden",
+              // bingkai putih → screenshot/gambar tampil UTUH (contain), tidak terpotong
+              background: "#ffffff",
+              padding: 12,
               boxShadow: `0 30px 60px rgba(0,0,0,0.5)`,
               transform: `scale(${interpolate(imgSpring, [0, 1], [0.8, 1])})`,
               opacity: interpolate(imgSpring, [0, 0.5], [0, 1]),
@@ -60,8 +63,10 @@ export const Reveal: React.FC<{
               src={src}
               style={{
                 width: "100%",
-                height: "100%",
-                objectFit: "cover",
+                maxHeight: height * 0.6 - 24,
+                borderRadius: 16,
+                display: "block",
+                objectFit: "contain",
               }}
             />
           </div>

@@ -358,14 +358,14 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch("https://api.kie.ai/gemini-3.1-pro/v1/chat/completions", {
+      const response = await fetch("https://api.kie.ai/gemini-3-7-flash-openai/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: "gemini-3.1-pro",
+          model: "gemini-3-7-flash-openai",
           messages: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: userContent }
@@ -616,7 +616,7 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
     }
     if (isFreePreviewUsed) {
       expressionAttributeValues[":one"] = 1;
-      expressionAttributeValues[":two"] = 2;
+      expressionAttributeValues[":fallback_quota"] = 1;
     }
 
     const creditCondition = "((attribute_not_exists(credit_balance) AND :z >= :c) OR (attribute_exists(credit_balance) AND credit_balance >= :c))";
@@ -628,7 +628,7 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
       updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_trial = if_not_exists(free_trial, :z) - :one, updated_at = :now";
       conditionExpr = `attribute_exists(user_id) AND ${creditCondition} AND free_trial > :z`;
     } else if (isFreePreviewUsed) {
-      updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_preview_quota = if_not_exists(free_preview_quota, :two) - :one, updated_at = :now";
+      updateExpr = "SET credit_balance = if_not_exists(credit_balance, :z) - :c, credit_usage = if_not_exists(credit_usage, :z) + :c, free_preview_quota = if_not_exists(free_preview_quota, :fallback_quota) - :one, updated_at = :now";
       conditionExpr = `attribute_exists(user_id) AND ${creditCondition} AND (attribute_not_exists(free_preview_quota) OR free_preview_quota > :z)`;
     }
 

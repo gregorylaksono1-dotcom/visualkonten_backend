@@ -35,7 +35,13 @@ async function triggerStateMachine({
   audio,
   audio_duration,
   previewAssets,
-  preview
+  preview,
+  prompt,
+  store_type,
+  selling_mode,
+  video_duration,
+  voice_selection_mode,
+  preferred_voice
 }) {
   if (!STATE_MACHINE_ARN) {
     throw new Error("STATE_MACHINE_ARN environment variable is not set.");
@@ -54,7 +60,13 @@ async function triggerStateMachine({
     audio: audio || null,
     audio_duration: audio_duration || null,
     previewAssets: previewAssets || {},
-    preview: preview || false
+    preview: preview || false,
+    prompt: prompt || null,
+    store_type: store_type || "offline",
+    selling_mode: selling_mode || "hard",
+    video_duration: video_duration || 15,
+    voice_selection_mode: voice_selection_mode || null,
+    preferred_voice: preferred_voice || null
   };
 
   console.log(`[SFN Orchestrator] Starting Step Function execution for Job ${jobId}`);
@@ -314,7 +326,7 @@ async function prepareJobData(payload) {
 }
 
 async function submitLockImage(payload) {
-  const { jobId, lock, userEmail, userId, taskToken } = payload;
+  const { jobId, lock, userEmail, userId, taskToken, aspect_ratio } = payload;
   console.log(`[SFN Orchestrator] submitLockImage for jobId ${jobId}, lock id ${lock.id}`);
   await saveTaskToken(jobId, userEmail, `lock_${lock.id}`, taskToken);
 
@@ -352,7 +364,8 @@ async function submitLockImage(payload) {
     callbackBase,
     kieApiKey,
     taskToken,
-    requestType
+    requestType,
+    aspectRatio: aspect_ratio
   });
 
   console.log(`[SFN Orchestrator] Lock Image Task ${taskId} created for lock ${lock.id}`);
@@ -362,7 +375,7 @@ async function submitLockImage(payload) {
  * Task: Submit Scene Image.
  */
 async function submitSceneImage(payload) {
-  const { jobId, scene, userEmail, userId, lockResults, taskToken } = payload;
+  const { jobId, scene, userEmail, userId, lockResults, taskToken, aspect_ratio } = payload;
 
   console.log(`[SFN Orchestrator] submitSceneImage for jobId ${jobId}, scene id ${scene.scene_id}`);
   await saveTaskToken(jobId, userEmail, `image_${scene.scene_id}`, taskToken);
@@ -429,7 +442,8 @@ async function submitSceneImage(payload) {
     callbackBase,
     kieApiKey,
     taskToken,
-    requestType
+    requestType,
+    aspectRatio: aspect_ratio
   });
 
   console.log(`[SFN Orchestrator] Scene Image Task ${taskId} created for scene ${scene.scene_id}`);
@@ -699,7 +713,11 @@ async function mergeVideoScenes(payload) {
 
     let cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -c copy -movflags +faststart ${outputPath}`;
     if (localAudioPath) {
-      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
+      // amix automatically scales volume by 1/N (so 1/2 for 2 inputs).
+      // To get 60% bg (0.6) and 100% vo (1.0), we pre-multiply by 2:
+      // BG: 0.6 * 2 = 1.2
+      // VO: 1.0 * 2 = 2.0
+      cmd = `${ffmpegCmd} -y -f concat -safe 0 -i ${listPath} -i ${localAudioPath} -filter_complex "[0:a]volume=1.2[bg];[1:a]volume=2.0[vo];[bg][vo]amix=inputs=2:duration=longest[a]" -map 0:v:0 -map "[a]" -c:v copy -c:a aac -movflags +faststart ${outputPath}`;
     }
 
     console.log(`[SFN Orchestrator Merge] Running FFmpeg: ${cmd}`);

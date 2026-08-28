@@ -85,11 +85,34 @@ export const sanitizeText = (t?: string | null): string => {
   return t.replace(PLACEHOLDER_RE, "").replace(/\s{2,}/g, " ").trim();
 };
 
+// ---------- KONTRAS PALET: teks/aksen TIDAK BOLEH menyatu dgn warna theme ----------
+// Blend hex ke arah target (putih/hitam) sebesar t (0..1).
+const mixHex = (hex: string, target: string, t: number): string => {
+  const [r1, g1, b1] = hexToRgb(hex), [r2, g2, b2] = hexToRgb(target);
+  const m = (a: number, b: number) => Math.round(a + (b - a) * t).toString(16).padStart(2, "0");
+  return `#${m(r1, r2)}${m(g1, g2)}${m(b1, b2)}`;
+};
+// Pastikan `ink` (warna teks utama) & `accent` selalu kontras dgn bg theme (brandB = warna terdalam).
+// Kalau menyatu → ink dipaksa ke putih/near-hitam sesuai terang-gelap bg; accent di-nudge biar tetap kelihatan.
+// Berlaku 2 arah: tema gelap (teks jadi terang) MAUPUN tema terang (teks jadi gelap).
+export const ensurePaletteContrast = (
+  pal: NonNullable<Props["theme"]["palette"]>
+): NonNullable<Props["theme"]["palette"]> => {
+  const bg = pal.brandB || pal.brandA || "#0a0a0a";
+  const bgDark = relLum(bg) < 0.45;
+  let ink = pal.ink;
+  if (!ink || contrastRatio(bg, ink) < 4.5) ink = bgDark ? "#ffffff" : "#0b0b0b";
+  let accent = pal.accent;
+  // accent dipakai sbg grafik & kadang teks → minimal harus jelas terlihat di bg
+  if (!accent || contrastRatio(bg, accent) < 2.2) accent = mixHex(accent || "#888888", bgDark ? "#ffffff" : "#000000", 0.5);
+  return { ...pal, ink, accent };
+};
+
 export const resolvePalette = (theme: Props["theme"]): NonNullable<Props["theme"]["palette"]> => {
-  if (theme.palette && theme.palette.brandB) return theme.palette as NonNullable<Props["theme"]["palette"]>;
-  if (theme.palette_id && palettePool[theme.palette_id]) return palettePool[theme.palette_id];
+  if (theme.palette && theme.palette.brandB) return ensurePaletteContrast(theme.palette as NonNullable<Props["theme"]["palette"]>);
+  if (theme.palette_id && palettePool[theme.palette_id]) return ensurePaletteContrast(palettePool[theme.palette_id]);
   // Fallback anti-seragam: kalau tak ada palette_id valid, rotasi deterministik dari pool
   // pakai bg_style+mood sebagai seed (⛔ jangan selalu biru default).
   const seed = hashStr(`${theme.bg_style || "aurora"}|${theme.mood || "fresh"}`);
-  return palettePool[POOL_IDS[seed % POOL_IDS.length]];
+  return ensurePaletteContrast(palettePool[POOL_IDS[seed % POOL_IDS.length]]);
 };

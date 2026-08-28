@@ -156,3 +156,48 @@ exports.handleRateUsage = async (event) => {
   }
 };
 
+exports.handleUpdateLlmResponse = async (event) => {
+  const { getClaims, parseBody, normalizeUserEmail } = require("../utils");
+  const claims = getClaims(event);
+  const userEmail = claims.email || claims.username;
+  if (!userEmail) return response(401, { error: "Unauthorized: missing email." });
+
+  const { pathParameters } = event;
+  const uuid = pathParameters?.uuid;
+  if (!uuid) return response(400, { error: "UUID is required" });
+
+  const body = parseBody(event);
+  const llm_response = body.llm_response;
+
+  if (!llm_response) {
+    return response(400, { error: "llm_response is required" });
+  }
+
+  const { docClient } = require("../services");
+  const { UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+
+  try {
+    await docClient.send(
+      new UpdateCommand({
+        TableName: USER_REQUEST_TABLE_NAME,
+        Key: { 
+          uuid: uuid,
+          user_email: normalizeUserEmail(userEmail)
+        },
+        UpdateExpression: "SET llm_response = :lr, updated_at = :u",
+        ConditionExpression: "attribute_exists(#uuid)",
+        ExpressionAttributeNames: {
+          "#uuid": "uuid"
+        },
+        ExpressionAttributeValues: {
+          ":lr": llm_response,
+          ":u": new Date().toISOString()
+        }
+      })
+    );
+    return response(200, { message: "LLM Response updated successfully" });
+  } catch (err) {
+    console.error("Update LLM Response error", err);
+    return response(500, { error: err.message });
+  }
+};

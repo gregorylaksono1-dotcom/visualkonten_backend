@@ -16,10 +16,11 @@ const Motif: React.FC<{ type: CvMotif; palette: CvPalette }> = ({ type, palette 
 
   if (type === "diagonal") {
     const ty = interpolate(inn, [0, 1], [140, 0]);
-    return <div style={{ position: "absolute", bottom: "-24%", left: "-20%", width: "140%", height: "72%", background: a, transform: `rotate(-12deg) translateY(${ty}px)`, opacity: 0.95 }} />;
+    // opacity rendah → aksen latar, BUKAN blok pekat di belakang teks (biar teks tetap terbaca di bg)
+    return <div style={{ position: "absolute", bottom: "-24%", left: "-20%", width: "140%", height: "72%", background: a, transform: `rotate(-12deg) translateY(${ty}px)`, opacity: 0.16 }} />;
   }
   if (type === "circle") {
-    return <div style={{ position: "absolute", top: "-26%", right: "-34%", width: width * 1.0, height: width * 1.0, borderRadius: "50%", background: a, transform: `scale(${interpolate(inn, [0, 1], [0.6, 1])})`, opacity: 0.9 }} />;
+    return <div style={{ position: "absolute", top: "-26%", right: "-34%", width: width * 1.0, height: width * 1.0, borderRadius: "50%", background: a, transform: `scale(${interpolate(inn, [0, 1], [0.6, 1])})`, opacity: 0.15 }} />;
   }
   if (type === "stripe") {
     const tx = interpolate(inn, [0, 1], [-160, 0]);
@@ -31,7 +32,7 @@ const Motif: React.FC<{ type: CvMotif; palette: CvPalette }> = ({ type, palette 
   if (type === "blocks") {
     const items = [{ x: 6, y: 12, s: 90, r: -8 }, { x: 84, y: 20, s: 60, r: 10 }, { x: 12, y: 82, s: 54, r: 6 }, { x: 88, y: 78, s: 76, r: -12 }];
     return <>{items.map((it, i) => {
-      const o = interpolate(spring({ fps, frame: frame - i * 4 }), [0, 1], [0, 0.9]);
+      const o = interpolate(spring({ fps, frame: frame - i * 4 }), [0, 1], [0, 0.5]);
       return <div key={i} style={{ position: "absolute", left: `${it.x}%`, top: `${it.y}%`, width: it.s, height: it.s, background: a, opacity: o, transform: `translate(-50%,-50%) rotate(${it.r + frame * 0.1}deg)`, borderRadius: 12 }} />;
     })}</>;
   }

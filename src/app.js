@@ -9,7 +9,7 @@ const { response } = require("./utils");
 const { handleGetHello } = require("./handlers/hello");
 const { handleGetUser, handlePostSellerFeedback } = require("./handlers/user");
 const { handleGetCredit } = require("./handlers/credit");
-const { handleGetUsage, handleRateUsage } = require("./handlers/usage");
+const { handleGetUsage, handleRateUsage, handleUpdateLlmResponse } = require("./handlers/usage");
 const { handleGetPricing, handleListPricing, handleLikePricing } = require("./handlers/pricing");
 const { handleGetTopup, handlePostSnap } = require("./handlers/topup");
 const { handlePostResource } = require("./handlers/resource");
@@ -40,6 +40,7 @@ exports.handler = async (event) => {
     if (route.startsWith("PUT /admin/vouchers/") && route.endsWith("/activate")) return handleActivateVoucher(event);
     if (route.startsWith("DELETE /admin/vouchers/")) return handleDeleteVoucher(event);
     if (route.startsWith("PUT /usage/") && route.endsWith("/rating")) return handleRateUsage(event);
+    if (route.startsWith("PUT /usage/") && route.endsWith("/llm_response")) return handleUpdateLlmResponse(event);
     if (route === "GET /jobs/status" || route === "POST /jobs/status") {
       const { handleBatchStatus } = require("./handlers/jobStatus");
       return handleBatchStatus(event);

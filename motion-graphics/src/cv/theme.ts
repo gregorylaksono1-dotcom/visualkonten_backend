@@ -41,11 +41,44 @@ export const FIELD_TO_KIT: Record<string, keyof typeof CV_KITS> = {
   health: "calm", education: "calm", nonprofit: "calm", hospitality: "calm",
 };
 
+// ---- KONTRAS: pastikan `text` selalu terbaca di atas `bg` ----
+// (LLM/builder kadang kirim theme.palette.text yang gelap → nyatu dgn bg gelap → tak terbaca)
+const _lum = (hex: string): number => {
+  let h = (hex || "#000").replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2) || "0", 16) / 255)
+    .map((s) => (s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const _contrast = (a: string, b: string): number => {
+  const la = _lum(a), lb = _lum(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+const _hexToRgb = (hex: string): [number, number, number] => {
+  let h = (hex || "#000").replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  return [parseInt(h.slice(0, 2) || "0", 16), parseInt(h.slice(2, 4) || "0", 16), parseInt(h.slice(4, 6) || "0", 16)];
+};
+const _mix = (hex: string, target: string, t: number): string => {
+  const [r1, g1, b1] = _hexToRgb(hex), [r2, g2, b2] = _hexToRgb(target);
+  const m = (a: number, b: number) => Math.round(a + (b - a) * t).toString(16).padStart(2, "0");
+  return `#${m(r1, r2)}${m(g1, g2)}${m(b1, b2)}`;
+};
+// Jamin text & accent TIDAK menyatu dgn bg (2 arah: bg gelap → terangkan, bg terang → gelapkan).
+const ensureReadable = (pal: CvPalette): CvPalette => {
+  const bgDark = _lum(pal.bg) < 0.45;
+  let text = pal.text;
+  if (!text || _contrast(pal.bg, text) < 4.5) text = bgDark ? "#ffffff" : "#0b0b0b";
+  let accent = pal.accent;
+  if (!accent || _contrast(pal.bg, accent) < 2.2) accent = _mix(accent || "#888888", bgDark ? "#ffffff" : "#000000", 0.5);
+  return { ...pal, text, accent };
+};
+
 export const resolveCvPalette = (theme: CvProps["theme"], field: string): CvPalette => {
-  if (theme.palette) return theme.palette;
+  if (theme.palette) return ensureReadable(theme.palette);
   const kit = CV_KITS[theme.kit] ? theme.kit : (FIELD_TO_KIT[field] || "creative");
   const pool = CV_KITS[kit];
-  return pool[Math.abs(theme.seed) % pool.length];
+  return ensureReadable(pool[Math.abs(theme.seed) % pool.length]);
 };
 
 export const cvMoodFont = (kit: string) => (kit === "premium" || kit === "calm" ? 1 : 1.05);

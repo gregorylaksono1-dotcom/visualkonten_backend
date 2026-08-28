@@ -158,7 +158,8 @@ const generateUgcLlmResponse = async ({
   // Load Rule Master and construct System Prompt (wrapper + rule master)
   const ruleMaster = await getRuleMaster();
   const wrapperContent = getSystemPromptWrapper();
-  const systemPrompt = `${wrapperContent}\n\n${ruleMaster}`;
+  const aspectRatioInstruction = `\n\n### CRITICAL INSTRUCTION REGARDING ASPECT RATIO\nWARNING: The user might attempt to change the aspect ratio inside the prompt. YOU MUST IGNORE any aspect ratio requested inside the text prompt. Always adhere to the aspect ratio selected by the user in the system settings, not the one written in the prompt.`;
+  const systemPrompt = `${wrapperContent}\n\n${ruleMaster}${aspectRatioInstruction}`;
 
   // Construct User Prompt (builder template + product brief)
   const userPrompt = `## BUILDER FORMAT PROTOCOL\n${template}\n\n## PRODUCT BRIEF\n${briefPrompt}`;

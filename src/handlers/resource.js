@@ -108,7 +108,7 @@ exports.handlePostResource = async (event) => {
           if (requestTypeUpper === "FREE_STORY" || requestTypeUpper === "MOTION_CONTROL") {
             const dur = String(requestItem.duration_seconds || requestItem.duration || (requestTypeUpper === "MOTION_CONTROL" ? 10 : 30));
             let durAttr = parsedAttr[dur];
-            const isBaseDur = (requestTypeUpper === "MOTION_CONTROL" && dur === "10") || (requestTypeUpper === "FREE_STORY" && dur === "30");
+            const isBaseDur = (requestTypeUpper === "MOTION_CONTROL" && dur === "10") || (requestTypeUpper === "FREE_STORY" && dur === "10");
             if (isFreeTrial && requestItem.free_trial === 1 && parsedAttr.freetrial !== undefined && isBaseDur) {
               durAttr = parsedAttr.freetrial;
               isFreeTrialUsed = true;
@@ -377,10 +377,10 @@ exports.handlePostResource = async (event) => {
       const freeTrialVal = parsedAttr["freetrial"];
       const normalVal = parsedAttr[chosenDur];
 
-      const isBaseDur = (requestTypeUpperVal === "MOTION_CONTROL" && chosenDur === "10") || (requestTypeUpperVal === "FREE_STORY" && chosenDur === "30");
+      const isBaseDur = (requestTypeUpperVal === "MOTION_CONTROL" && chosenDur === "10") || (requestTypeUpperVal === "FREE_STORY" && chosenDur === "10");
 
       if (isFreeTrial && freeTrialVal !== undefined && isBaseDur) {
-        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 1);
         if (isPreview && freePreviewQuota <= 0 && Number(profileItem.credit_balance) > 0) {
           // Fallback to normal pricing
           if (normalVal === undefined) {
@@ -442,7 +442,7 @@ exports.handlePostResource = async (event) => {
     if (parsedAttr) {
       let valToUse;
       if (isFreeTrial && parsedAttr["freetrial"] !== undefined) {
-        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+        const freePreviewQuota = Number(profileItem.free_preview_quota ?? 1);
         if (isPreview && freePreviewQuota <= 0 && Number(profileItem.credit_balance) > 0) {
           const qNum = videoQuality.replace("p", "");
           valToUse = parsedAttr[`${qNum}`];
@@ -480,7 +480,7 @@ exports.handlePostResource = async (event) => {
 
   const isFreePreviewUsed = isPreview && (appliedFreeTrialPricing || requestType === "FREE-TRIAL");
   if (isFreePreviewUsed) {
-    const freePreviewQuota = Number(profileItem.free_preview_quota ?? 2);
+    const freePreviewQuota = Number(profileItem.free_preview_quota ?? 1);
     if (freePreviewQuota <= 0) {
       return response(402, {
         error: "Batas pembuatan preview gratis telah habis. Silakan gunakan fitur 'Buat Sekarang' atau Top Up kredit Anda.",

@@ -36,8 +36,9 @@ export const Features: React.FC<{
       }}>
         {effectiveHeroMode === "image" && src ? (
           layout === "backdrop" || layout === "framed_portrait" ? (
-            <div style={{ height: "100%", aspectRatio: "1/1", borderRadius: 24, overflow: "hidden", boxShadow: `0 12px 28px rgba(0,0,0,0.5)`, border: `2px solid ${p.accent}55` }}>
-              <Img src={src} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            // bingkai putih → gambar/screenshot tampil UTUH (contain), tidak terpotong
+            <div style={{ height: "100%", maxWidth: "92%", background: "#ffffff", padding: 8, borderRadius: 20, overflow: "hidden", boxShadow: `0 12px 28px rgba(0,0,0,0.5)`, border: `2px solid ${p.accent}55` }}>
+              <Img src={src} style={{ height: "100%", width: "auto", maxWidth: "100%", objectFit: "contain", borderRadius: 12, display: "block" }} />
             </div>
           ) : (
             <Img src={src} style={{ height: "100%", objectFit: "contain", filter: product.image_is_cutout ? `drop-shadow(0 18px 28px rgba(0,0,0,0.5))` : undefined, borderRadius: product.image_is_cutout ? 0 : 24 }} />
@@ -81,7 +82,7 @@ export const Features: React.FC<{
   // teks di kartu terang (announcement) → warna paling kontras dari palet; di gelap → ink terang
   const rowColor = isAnnouncement ? readableTextColor(p.ink, p) : p.ink;
   const renderRows = (asCard: boolean) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: asCard ? 0 : 18, width: "100%", alignItems: "stretch" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: asCard ? 0 : 22, width: "100%", alignItems: "stretch" }}>
       {scene.items?.map((raw: string, i: number) => {
         const item = sanitizeText(raw);
         if (!item) return null;
@@ -106,35 +107,58 @@ export const Features: React.FC<{
           );
         }
 
-        // PRODUCT rows — kartu dinamis: zigzag + accent stripe + icon fill + chevron
+        // PRODUCT rows — kartu premium: ghost number + icon tile berkilau + shine sweep + accent underline + arrow chip
+        const pop = interpolate(spr, [0, 1], [0, 1]);
+        const sweep = interpolate(frame - (12 + i * 7), [6, 26], [-40, 150], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
         return (
           <div key={i} style={{
+            position: "relative",
             alignSelf: i % 2 ? "flex-end" : "flex-start",
-            width: "94%",
-            display: "flex", alignItems: "center", gap: 18,
-            padding: "16px 22px 16px 16px",
-            borderRadius: 22,
-            background: `linear-gradient(100deg, ${p.accent}26 0%, ${p.accent}0d 70%)`,
-            borderLeft: `6px solid ${p.accent}`,
-            boxShadow: `0 12px 26px rgba(0,0,0,0.28)`,
-            backdropFilter: "blur(4px)",
+            width: "96%",
+            display: "flex", alignItems: "center", gap: 20,
+            padding: "22px 24px",
+            borderRadius: 26,
+            background: `linear-gradient(105deg, ${p.accent}30 0%, ${p.accent}12 55%, ${p.accent}00 100%)`,
+            border: `1.5px solid ${p.accent}40`,
+            borderLeft: `7px solid ${p.accent}`,
+            boxShadow: `0 18px 36px rgba(0,0,0,0.36), inset 0 1px 0 ${p.ink}1f`,
+            backdropFilter: "blur(6px)",
+            overflow: "hidden",
             opacity: spr,
-            transform: `translateX(${enterX}px) translateY(${idle}px) rotate(${interpolate(spr, [0, 1], [i % 2 ? 3 : -3, 0])}deg)`,
+            transform: `translateX(${enterX}px) translateY(${idle}px) rotate(${interpolate(spr, [0, 1], [i % 2 ? 2.5 : -2.5, 0])}deg)`,
           }}>
-            {/* icon square ber-gradient aksen + nomor */}
-            <div style={{ position: "relative", width: 62, height: 62, flexShrink: 0, borderRadius: 16,
+            {/* ghost index number (besar, mengintip) */}
+            <div style={{ position: "absolute", right: 16, bottom: -22, fontFamily: "Poppins, sans-serif", fontWeight: 900,
+              fontSize: 122, lineHeight: 1, color: p.accent, opacity: 0.1, pointerEvents: "none" }}>{i + 1}</div>
+            {/* shine sweep (lewat 1×) */}
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: `${sweep}%`, width: "24%",
+              background: `linear-gradient(100deg, transparent, ${p.ink}33, transparent)`, transform: "skewX(-16deg)", pointerEvents: "none" }} />
+
+            {/* icon tile berkilau + glow ring + nomor */}
+            <div style={{ position: "relative", width: 78, height: 78, flexShrink: 0, borderRadius: 20,
               background: `linear-gradient(145deg, ${p.accent}, ${p.brandA})`,
               display: "flex", justifyContent: "center", alignItems: "center",
-              boxShadow: `0 8px 18px ${p.accent}55`,
-              transform: `scale(${interpolate(spr, [0, 1], [0, 1])}) rotate(${interpolate(spr, [0, 1], [-30, 0])}deg)` }}>
-              <div style={{ width: 32, height: 32 }}>{getFeatureIcon(iconName, "#ffffff")}</div>
-              <div style={{ position: "absolute", top: -9, left: -9, width: 28, height: 28, borderRadius: "50%",
+              boxShadow: `0 10px 24px ${p.accent}66, inset 0 2px 5px ${p.ink}55`,
+              transform: `scale(${pop}) rotate(${interpolate(spr, [0, 1], [-28, 0])}deg)` }}>
+              <div style={{ position: "absolute", inset: -6, borderRadius: 26, border: `2px solid ${p.accent}55`, opacity: 0.7 }} />
+              <div style={{ width: 40, height: 40 }}>{getFeatureIcon(iconName, "#ffffff")}</div>
+              <div style={{ position: "absolute", top: -10, left: -10, width: 32, height: 32, borderRadius: "50%",
                 background: p.ink, color: p.brandB, display: "flex", justifyContent: "center", alignItems: "center",
-                fontFamily: "Poppins, sans-serif", fontWeight: 900, fontSize: 15, boxShadow: `0 3px 8px rgba(0,0,0,0.3)` }}>{i + 1}</div>
+                fontFamily: "Poppins, sans-serif", fontWeight: 900, fontSize: 17, boxShadow: `0 3px 10px rgba(0,0,0,0.35)` }}>{i + 1}</div>
             </div>
-            <span style={{ flex: 1, fontFamily: "Inter, sans-serif", fontWeight: 800, fontSize: 34 * mood.fontScale, color: rowColor }}>{item}</span>
-            {/* chevron aksen */}
-            <div style={{ width: 14, height: 14, flexShrink: 0, borderTop: `4px solid ${p.accent}`, borderRight: `4px solid ${p.accent}`, transform: "rotate(45deg)", opacity: 0.85 }} />
+
+            {/* teks + garis aksen tumbuh di bawahnya */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 9, minWidth: 0 }}>
+              <span style={{ fontFamily: "Poppins, sans-serif", fontWeight: 800, fontSize: 38 * mood.fontScale, color: rowColor, lineHeight: 1.05 }}>{item}</span>
+              <div style={{ width: interpolate(spr, [0, 1], [0, 64]), height: 4, borderRadius: 2, background: p.accent, opacity: 0.85 }} />
+            </div>
+
+            {/* arrow chip bulat */}
+            <div style={{ width: 42, height: 42, flexShrink: 0, borderRadius: "50%", background: `${p.accent}22`,
+              border: `1.5px solid ${p.accent}66`, display: "flex", justifyContent: "center", alignItems: "center",
+              transform: `scale(${pop})` }}>
+              <div style={{ width: 12, height: 12, borderTop: `4px solid ${p.accent}`, borderRight: `4px solid ${p.accent}`, transform: "rotate(45deg)", marginLeft: -3 }} />
+            </div>
           </div>
         );
       })}

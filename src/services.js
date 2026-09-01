@@ -21,6 +21,7 @@ const {
 const parseCreditsFromPricingItem = require("./utils").parseCreditsFromPricingItem;
 const buildCreditStatusFilterParts = require("./utils").buildCreditStatusFilterParts;
 const response = require("./utils").response;
+const { GoogleGenAI } = require("@google/genai");
 
 const region = process.env.AWS_REGION || "ap-southeast-1";
 const client = new DynamoDBClient({ region });
@@ -318,7 +319,7 @@ const getFalAiKey = async () => {
 };
 
 const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options = {}) => {
-  console.log("Starting Kie.ai GPT-5.6 call...");
+  console.log("Starting Gemini API (via OpenAI compat) call...");
 
   const requireImage = options.requireImage !== undefined ? options.requireImage : true;
   const injectProductInstruction = options.injectProductInstruction !== undefined ? options.injectProductInstruction : true;
@@ -335,22 +336,32 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
 
   finalSystemPrompt += `\n\nCRITICAL INSTRUCTION: You are operating as a backend system processing unit. You MUST return ONLY a valid JSON object. Do NOT include any conversational text, introductory remarks, markdown fences (like \`\`\`json), or explanations. Return ONLY the raw JSON structure requested.`;
 
-  const apiKey = await getKieAiKey();
+  const apiKey = await getGeminiKey();
   if (!apiKey) {
-    console.error("Kie.ai API Key not found in SSM Parameter Store.");
-    throw new Error("Kie.ai API Key not found.");
+    console.error("Gemini API Key not found in SSM Parameter Store.");
+    throw new Error("Gemini API Key not found.");
   }
 
-  let userContent = userPrompt;
+  const ai = new GoogleGenAI({ apiKey });
+
+  let userContent = [userPrompt];
   if (Array.isArray(imageUrls) && imageUrls.length > 0) {
     console.log(`[services] callOpenAILLM: Including ${imageUrls.length} image(s) in vision LLM payload`);
-    userContent = [
-      { type: "text", text: userPrompt },
-      ...imageUrls.map(url => ({
-        type: "image_url",
-        image_url: { url }
-      }))
-    ];
+    for (const url of imageUrls) {
+      try {
+        const imgResp = await fetch(url);
+        if (imgResp.ok) {
+          const arrayBuffer = await imgResp.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString('base64');
+          const mimeType = imgResp.headers.get('content-type') || 'image/jpeg';
+          userContent.push({
+            inlineData: { data: base64, mimeType: mimeType }
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch image for LLM:", err.message);
+      }
+    }
   }
 
   const maxRetries = 3;
@@ -358,67 +369,18 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch("https://api.kie.ai/gemini-3-7-flash-openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "gemini-3-7-flash-openai",
-          messages: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: userContent }
-          ],
-          temperature: 1
-        })
+      const response = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: userContent,
+        config: {
+          systemInstruction: finalSystemPrompt,
+          responseMimeType: "application/json",
+        }
       });
 
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "{}");
-        console.error(`Kie.ai API error: ${response.status}`, errorText);
-        throw new Error(`Kie.ai API error: ${response.status} ${errorText}`);
-      }
-
-      const textResponse = await response.text();
-      let json;
-      try {
-        json = JSON.parse(textResponse);
-      } catch (err) {
-        // Handle SSE if it ignored stream: false
-        const dataMatch = textResponse.match(/data:\s*({.*})/);
-        if (dataMatch) {
-          json = JSON.parse(dataMatch[1]);
-        } else {
-          throw new Error(`Unexpected LLM response format, not valid JSON: ${textResponse.substring(0, 100)}...`);
-        }
-      }
-
-      if (json.error) {
-        console.error("Kie.ai returned an error object:", JSON.stringify(json.error));
-        throw new Error(`Kie.ai API Error: ${json.error.message || JSON.stringify(json.error)}`);
-      }
-
-      let content = "";
-      if (json.choices && json.choices[0] && json.choices[0].message) {
-        content = json.choices[0].message.content;
-      } else if (json.output && Array.isArray(json.output)) {
-        const messageOutput = json.output.find(o => o.type === "message" || o.phase === "final_answer");
-        if (messageOutput && messageOutput.content && Array.isArray(messageOutput.content)) {
-          const textContent = messageOutput.content.find(c => c.type === "output_text" || c.text);
-          if (textContent && textContent.text) {
-            content = textContent.text;
-          }
-        }
-      }
-
-      if (!content) {
-        console.error("Unexpected LLM response structure (content missing):", JSON.stringify(json));
-        throw new Error(`Invalid LLM response structure (content missing): ${JSON.stringify(json)}`);
-      }
-
+      let content = response.text || "";
       content = content.trim();
-      console.log(`Kie.ai call successful on attempt ${attempt}. Response content:`, content);
+      console.log(`Gemini API call successful on attempt ${attempt}. Response content:`, content);
       return content;
     } catch (err) {
       console.error(`[services] callOpenAILLM attempt ${attempt} failed:`, err.message);
@@ -431,7 +393,7 @@ const callOpenAILLM = async (systemPrompt, userPrompt, imageUrls = [], options =
     }
   }
 
-  console.error("Kie.ai request failed after 3 attempts.");
+  console.error("Gemini API request failed after 3 attempts.");
   throw lastError;
 };
 

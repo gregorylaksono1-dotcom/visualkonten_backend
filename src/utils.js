@@ -58,6 +58,9 @@ const mapUserRequestUsageRow = (item) => ({
   video_generation_duration: item.video_generation_duration ?? null,
   rating: item.rating ?? null,
   review_text: item.review_text ?? null,
+  story_type: item.story_type ?? null,
+  language: item.language ?? null,
+  duration_seconds: item.duration_seconds ?? null,
 });
 
 const parseImageBase64 = (raw) => {

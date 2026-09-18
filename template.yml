@@ -546,6 +546,13 @@ Resources:
               Ref: Api
             Path: /user/seller
             Method: post
+        PostUserFeedback:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /user/feedback
+            Method: post
         GetCredit:
           Type: Api
           Properties:
@@ -608,6 +615,13 @@ Resources:
             RestApiId:
               Ref: Api
             Path: /pricing/{key}/like
+            Method: post
+        VotePricing:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /pricing/{key}/vote
             Method: post
         GetTopupDetail:
           Type: Api
@@ -1281,6 +1295,11 @@ Resources:
           Resource:
           - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-VideoGeneration${EnvironmentSuffix}:*
           - Fn::Sub: arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:BikinAi-MotionGraphics${EnvironmentSuffix}:*
+        - Effect: Allow
+          Action:
+          - states:SendTaskSuccess
+          - states:SendTaskFailure
+          Resource: "*"
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME:
@@ -1296,10 +1315,10 @@ Resources:
           UPSTASH_REDIS_REST_TOKEN:
             Ref: UpstashRedisRestToken
       Events:
-        TwoMinuteCronEvent:
+        RecoveryCronEvent:
           Type: Schedule
           Properties:
-            Schedule: rate(2 minutes)
+            Schedule: rate(15 minutes)
             Description: Recover stalled jobs and retry concurrency failures
             Enabled: true
 

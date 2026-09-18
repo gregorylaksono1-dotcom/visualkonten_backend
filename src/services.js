@@ -118,6 +118,9 @@ const invokeComfyUI = async (jobId, jobDetail) => {
     aspectRatio: jobDetail.aspectRatio || jobDetail.aspect_ratio,
     s3ImageUrls,
     store_type: jobDetail.store_type || null,
+    story_type: jobDetail.story_type || null,
+    language: jobDetail.language || "id",
+    duration_seconds: jobDetail.duration_seconds || null,
   };
 
   try {

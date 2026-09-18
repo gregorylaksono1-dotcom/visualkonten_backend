@@ -22,3 +22,29 @@ exports.handlePostSellerFeedback = async (event) => {
     return response(500, { error: "Failed to process feedback" });
   }
 };
+exports.handlePostFeedback = async (event) => {
+  const email = getClaims(event).email;
+  if (!email) return response(401, { error: "Unauthorized: missing email claim." });
+
+  let body = {};
+  try {
+    if (event.body) {
+      body = JSON.parse(event.body);
+    }
+  } catch (e) {
+    return response(400, { error: "Invalid JSON body" });
+  }
+
+  const { message } = body;
+  if (!message || typeof message !== "string" || message.trim() === "") {
+    return response(400, { error: "Message is required." });
+  }
+
+  try {
+    await sendTelegramMessage(`${email}: ${message.trim()}`);
+    return response(200, { message: "Feedback recorded" });
+  } catch (error) {
+    console.error("Failed to send telegram message", error);
+    return response(500, { error: "Failed to process feedback" });
+  }
+};

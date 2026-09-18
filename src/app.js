@@ -7,10 +7,10 @@
 
 const { response } = require("./utils");
 const { handleGetHello } = require("./handlers/hello");
-const { handleGetUser, handlePostSellerFeedback } = require("./handlers/user");
+const { handleGetUser, handlePostSellerFeedback, handlePostFeedback } = require("./handlers/user");
 const { handleGetCredit } = require("./handlers/credit");
 const { handleGetUsage, handleRateUsage, handleUpdateLlmResponse } = require("./handlers/usage");
-const { handleGetPricing, handleListPricing, handleLikePricing } = require("./handlers/pricing");
+const { handleGetPricing, handleListPricing, handleLikePricing, handleVotePricing } = require("./handlers/pricing");
 const { handleGetTopup, handlePostSnap } = require("./handlers/topup");
 const { handlePostResource } = require("./handlers/resource");
 const { handleListVouchers, handleCreateVoucher, handleClaimVoucher, handleDeactivateVoucher, handleDeleteVoucher, handleActivateVoucher } = require("./handlers/voucher");
@@ -25,10 +25,12 @@ exports.handler = async (event) => {
     if (route === "GET /hello") return handleGetHello();
     if (route === "GET /user") return handleGetUser(event);
     if (route === "POST /user/seller") return handlePostSellerFeedback(event);
+    if (route === "POST /user/feedback") return handlePostFeedback(event);
     if (route === "GET /credit") return handleGetCredit(event);
     if (route === "GET /usage") return handleGetUsage(event);
     if (route === "GET /pricing") return handleListPricing(event);
     if (route.startsWith("POST /pricing/") && route.endsWith("/like")) return handleLikePricing(event, pathParameters.key);
+    if (route.startsWith("POST /pricing/") && route.endsWith("/vote")) return handleVotePricing(event, pathParameters.key);
     if (route.startsWith("GET /pricing/")) return handleGetPricing(event, pathParameters.key);
     if (route.startsWith("GET /topup/")) return handleGetTopup(event, pathParameters.orderId || pathParameters.order_id);
     if (route === "POST /snap") return handlePostSnap(event);

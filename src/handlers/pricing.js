@@ -16,6 +16,7 @@ exports.handleGetPricing = async (event, pricingKeyParam) => {
       attr: resolved.item.attr,
       description: resolved.item.description || null,
       sample: resolved.item.sample,
+      popularity: resolved.item.popularity !== undefined ? Number(resolved.item.popularity) : 0,
       coming_soon: resolved.item.coming_soon === true || resolved.item.coming_soon === "true",
       durasi: resolved.item.durasi
     },
@@ -73,6 +74,32 @@ exports.handleLikePricing = async (event, pricingKeyParam) => {
     });
   } catch (err) {
     console.error("handleLikePricing error:", err.message);
+    return response(500, { error: err.message });
+  }
+};
+
+exports.handleVotePricing = async (event, pricingKeyParam) => {
+  const decodedKey = decodeURIComponent(String(pricingKeyParam).trim());
+  if (!decodedKey) return response(400, { error: "Missing pricing key." });
+
+  const { sendTelegramMessage } = require("../lib/telegram");
+  const { getClaims } = require("../utils");
+
+  try {
+    const claims = getClaims(event);
+    const email = claims.email || claims.username || "Anonymous User";
+    
+    const updatedPopularity = await incrementPricingPopularity(decodedKey);
+    
+    // Send Telegram Notification
+    await sendTelegramMessage(`New vote for Timelapse (${decodedKey}) from: ${email}`).catch(console.error);
+
+    return response(200, {
+      data: { key: decodedKey, popularity: updatedPopularity },
+      message: "Vote recorded successfully."
+    });
+  } catch (err) {
+    console.error("handleVotePricing error:", err.message);
     return response(500, { error: err.message });
   }
 };

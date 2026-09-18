@@ -264,6 +264,7 @@ const generateLLMPrompt = async (event) => {
           prompt,
           videoQuality: data.videoQuality || existingJob.video_quality,
           aspectRatio: data.aspectRatio || existingJob.aspect_ratio,
+          language: data.language || existingJob.language || "id",
           S3_RESOURCE_BUCKET,
           dynamo,
           s3: s3Client,

@@ -60,6 +60,7 @@ exports.handleBatchStatus = async (event) => {
                 error_message: item.error_message ?? null,
                 duration_seconds: item.duration_seconds ?? null,
                 story_type: item.story_type ?? null,
+                language: item.language ?? null,
                 preview_duration: item.preview_duration ?? null,
                 video_generation_duration: item.video_generation_duration ?? null,
                 rating: item.rating ?? null,

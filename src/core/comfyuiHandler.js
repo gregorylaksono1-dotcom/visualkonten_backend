@@ -7,6 +7,35 @@ const fs = require("fs");
 const path = require("path");
 
 /**
+ * Downloads a URL buffer with up to 3 retries and timeout per attempt.
+ */
+async function fetchBufferWithRetry(url, retries = 3, timeoutMs = 20000) {
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`[Download] (Attempt ${attempt}/${retries}) Downloading: ${url.slice(0, 100)}...`);
+      const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
+      const res = await fetch(url, { signal });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const arrayBuf = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      console.log(`[Download] Successfully downloaded ${buffer.length} bytes on attempt ${attempt}`);
+      return buffer;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Download] Attempt ${attempt}/${retries} failed: ${err.message}`);
+      if (attempt < retries) {
+        const delay = attempt * 1500;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw new Error(`Failed to download after ${retries} attempts: ${lastError?.message}`);
+}
+
+/**
  * Downloads a static FFmpeg binary for Linux x86_64 at runtime, caches it in /tmp/ffmpeg, and makes it executable.
  */
 async function ensureFfmpegBinary() {
@@ -16,11 +45,7 @@ async function ensureFfmpegBinary() {
   }
   console.log(`[FFmpeg] FFmpeg binary not found in /tmp. Downloading static build...`);
   const url = "https://github.com/eugeneware/ffmpeg-static-binaries/releases/download/b4.2.2/ffmpeg-linux-x64";
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`Failed to download static FFmpeg: ${resp.status}`);
-  }
-  const buffer = Buffer.from(await resp.arrayBuffer());
+  const buffer = await fetchBufferWithRetry(url, 3, 30000);
   fs.writeFileSync(localFfmpegPath, buffer);
   fs.chmodSync(localFfmpegPath, "755");
   console.log(`[FFmpeg] Static FFmpeg downloaded and made executable.`);
@@ -43,9 +68,8 @@ async function mergeVideoScenes(job, videoScenes, dynamo, s3, USER_REQUEST_TABLE
       
       const localPath = path.join(tmpDir, `scene_${sceneNum}.mp4`);
       console.log(`[FFmpeg Merge] Downloading scene ${sceneNum} from ${url}`);
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Failed to download scene ${sceneNum}: ${resp.status}`);
-      fs.writeFileSync(localPath, Buffer.from(await resp.arrayBuffer()));
+      const buffer = await fetchBufferWithRetry(url, 3, 25000);
+      fs.writeFileSync(localPath, buffer);
       inputPaths.push(localPath);
     }
 
@@ -222,9 +246,7 @@ async function processKieAiCompletion(params) {
       console.log(`[Kie.ai Completion] Found matching multi-scene task: Scene ${sceneId} (idx: ${vsItemIdx})`);
 
       // Download scene video
-      const res = await fetch(resultUrl);
-      if (!res.ok) throw new Error(`Failed to download scene result: ${res.status}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
+      const buffer = await fetchBufferWithRetry(resultUrl, 3, 25000);
       const s3Key = `generated_videos/${userId}/scenes/${jobId}_scene_${sceneId}.mp4`;
 
       await s3.send(new PutObjectCommand({
@@ -264,9 +286,7 @@ async function processKieAiCompletion(params) {
   }
 
   // ─── Case B: Standard Single Image/Video ───
-  const res = await fetch(resultUrl);
-  if (!res.ok) throw new Error(`Failed to download Kie.ai result: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = await fetchBufferWithRetry(resultUrl, 3, 25000);
 
   const isVideo = ["videos", "video", "gifs"].includes(mediaType) ||
     resultUrl.toLowerCase().includes('.mp4') ||
@@ -414,9 +434,7 @@ async function processComfyUICompletion(params) {
 
       // Download and upload to S3
       console.log(`[ComfyUI Webhook SFN Callback] Downloading result from ${resultUrl}`);
-      const res = await fetch(resultUrl);
-      if (!res.ok) throw new Error(`Failed to download result: ${res.status}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
+      const buffer = await fetchBufferWithRetry(resultUrl, 3, 25000);
 
       let s3Key;
       let outputObj = {};

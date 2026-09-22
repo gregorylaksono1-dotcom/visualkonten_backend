@@ -1211,7 +1211,7 @@ Resources:
       CodeUri: src/
       Handler: handlers/comfyuiWebhook.handler
       Runtime: nodejs22.x
-      Timeout: 30
+      Timeout: 90
       MemorySize: 512 # Increase memory for image processing/download
       Policies:
       - DynamoDBCrudPolicy:
@@ -1672,4 +1672,3 @@ Outputs:
 # check log di prod
 # sam logs -n ComfyUIWorkerFunction --stack-name BikinAi-backend-prod --region ap-southeast-1 --tail --profile production
 # sam logs -n ComfyUIWebhookFunction --stack-name BikinAi-backend-prod --profile production --region ap-southeast-1 --tail
-

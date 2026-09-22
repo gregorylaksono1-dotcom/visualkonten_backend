@@ -75,7 +75,7 @@ exports.handlePostResource = async (event) => {
         return response(403, { error: "Forbidden: You do not own this request." });
       }
 
-      if (requestItem.preview !== 1 && requestItem.preview !== "1") {
+      if (requestItem.preview !== 1 && requestItem.preview !== "1" && !requestItem.prompt_only) {
         return response(400, { error: "This request is not a preview or is already a full generation." });
       }
 
@@ -328,6 +328,8 @@ exports.handlePostResource = async (event) => {
     pricingKey = hasImage ? "IMAGE-TO-IMAGE" : "TEXT-TO-IMAGE";
   }
 
+  const isPromptOnly = body.prompt_only === true || body.prompt_only === "true" || body.mode === "prompt_only";
+
   if (isPreview) {
     const rTypeUpper = String(requestType || "").toUpperCase();
     // No longer override pricingKey to "PREVIEW" here, we want the template's normal pricing row 
@@ -369,7 +371,18 @@ exports.handlePostResource = async (event) => {
 
   let finalAmount = pricing.amount;
   const requestTypeUpperVal = String(requestType || "").toUpperCase();
-  if (requestTypeUpperVal === "MOTION_CONTROL" || requestTypeUpperVal === "FREE_STORY") {
+  if (isPromptOnly && requestTypeUpperVal === "FREE_STORY") {
+    let parsedAttr = null;
+    try {
+      parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
+    } catch (e) { }
+    if (parsedAttr && parsedAttr.prompt !== undefined) {
+      const pAttr = parsedAttr.prompt;
+      finalAmount = typeof pAttr === "object" ? Number(pAttr.price ?? 5) : Number(pAttr);
+    } else {
+      finalAmount = 5;
+    }
+  } else if (requestTypeUpperVal === "MOTION_CONTROL" || requestTypeUpperVal === "FREE_STORY") {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
@@ -561,7 +574,8 @@ exports.handlePostResource = async (event) => {
     duration_seconds: body.duration_seconds || body.duration || null,
     free_trial: (appliedFreeTrialPricing || requestType === "FREE-TRIAL") ? 1 : 0,
     preview: isPreview ? 1 : 0,
-    video_gen_start_at: isPreview ? null : now,
+    prompt_only: isPromptOnly === true,
+    video_gen_start_at: (isPreview || isPromptOnly) ? null : now,
     ...(videoRefKey ? { video_ref_key: videoRefKey } : {}),
     ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
   };
@@ -599,6 +613,7 @@ exports.handlePostResource = async (event) => {
     preferred_voice: body.preferred_voice || null,
     lip_sync: requestType === "FREE-TRIAL" ? false : true,
     preview: isPreview,
+    prompt_only: isPromptOnly === true,
     video_ref_key: videoRefKey,
     duration_seconds: body.duration_seconds || 5
   };

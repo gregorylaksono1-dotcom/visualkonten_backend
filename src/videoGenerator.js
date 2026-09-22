@@ -36,7 +36,7 @@ const REGION = process.env.AWS_REGION || "ap-southeast-1";
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
-const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId, videoGenerationDuration, error_message, llm_reason } = {}) => {
+const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPromptId, videoGenerationDuration, error_message, llm_reason, prompt_only } = {}) => {
   const updates = ["#s = :s", "updated_at = :u"];
   const names = { "#s": "status" };
   const values = { ":s": status, ":u": getJakartaISOString() };
@@ -60,6 +60,10 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
   if (llm_reason !== undefined && llm_reason !== null) {
     updates.push("llm_reason = :llmr");
     values[":llmr"] = llm_reason;
+  }
+  if (prompt_only !== undefined) {
+    updates.push("prompt_only = :po");
+    values[":po"] = Boolean(prompt_only);
   }
 
   try {
@@ -412,6 +416,90 @@ const generateLLMPrompt = async (event) => {
   return data;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function executeWithRetry(fn, { maxAttempts = 3, intervalSeconds = 5, backoffRate = 2.0 } = {}) {
+  let attempt = 0;
+  let currentDelay = intervalSeconds * 1000;
+
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      if (err.name === "LLMPolicyRejectionError" || err.message?.includes("LLMPolicyRejectionError")) {
+        console.warn(`[executeWithRetry] Policy rejection error encountered. Aborting retry.`);
+        throw err;
+      }
+
+      if (attempt >= maxAttempts) {
+        console.error(`[executeWithRetry] All ${maxAttempts} attempts failed. Last error:`, err.message);
+        throw err;
+      }
+
+      console.warn(`[executeWithRetry] Attempt ${attempt} failed: ${err.message}. Retrying in ${currentDelay}ms...`);
+      await sleep(currentDelay);
+      currentDelay *= backoffRate;
+    }
+  }
+}
+
+const handlePromptOnlySubmission = async (event, existingJob) => {
+  const { jobId, userEmail, requestType } = event;
+  const currentS3ImageUrls = Array.isArray(event.s3ImageUrls) ? event.s3ImageUrls : (event.s3ImageUrls ? [event.s3ImageUrls] : []);
+
+  console.log(`[Worker] Starting PROMPT ONLY plain JS execution for job ${jobId} (Type: ${requestType})`);
+  await sendTelegramMessage(`user "${userEmail}" melakukan generasi prompt saja ${requestType} (prompt_only: true)`).catch(console.error);
+
+  try {
+    const { loadPromptBuilder, handleGenericTemplate } = require("./prompt/genericTemplateHandler");
+    const templatePrompt = await loadPromptBuilder(requestType);
+
+    await executeWithRetry(async () => {
+      console.log(`[Worker] [PromptOnly] Invoking LLM via handleGenericTemplate for job ${jobId}...`);
+      await handleGenericTemplate({
+        jobId,
+        userEmail,
+        userId: event.userId || existingJob.user_id,
+        currentS3ImageUrls,
+        prompt: event.prompt || existingJob.prompt,
+        videoQuality: event.videoQuality || existingJob.video_quality || "720p",
+        aspectRatio: event.aspectRatio || existingJob.aspect_ratio || "9:16",
+        language: event.language || existingJob.language || "id",
+        S3_RESOURCE_BUCKET,
+        dynamo,
+        s3: s3Client,
+        USER_REQUEST_TABLE,
+        preview: false,
+        existingJob,
+        requestType,
+        template: templatePrompt
+      });
+    }, { maxAttempts: 3, intervalSeconds: 5, backoffRate: 2.0 });
+
+    await updateDynamoStatus(jobId, userEmail, "PREVIEW", {
+      prompt_only: true
+    });
+
+    console.log(`[Worker] [PromptOnly] Successfully generated prompt for job ${jobId} and updated status to PREVIEW.`);
+  } catch (err) {
+    console.error(`[Worker] [PromptOnly] Error generating prompt for job ${jobId}:`, err);
+    if (err.name === "LLMPolicyRejectionError" || err.message?.includes("LLMPolicyRejectionError")) {
+      await updateDynamoStatus(jobId, userEmail, "ERROR_LLM", {
+        error_message: err.message,
+        llm_reason: err.message,
+        prompt_only: true
+      });
+      await sendTelegramMessage(`${userEmail} error_llm ${err.message}`).catch(console.error);
+    } else {
+      await updateDynamoStatus(jobId, userEmail, "FAILED", {
+        error_message: err.message || "Gagal memproses prompt LLM.",
+        prompt_only: true
+      });
+    }
+  }
+};
+
 const handleSubmission = async (event) => {
   const { jobId, userEmail, requestType, s3ImageUrls, preview } = event;
 
@@ -426,6 +514,11 @@ const handleSubmission = async (event) => {
     existingJob = jobGet.Item || {};
   } catch (err) {
     console.error("[Worker] Error fetching existing request:", err.message);
+  }
+
+  const isPromptOnly = Boolean(event.prompt_only || existingJob.prompt_only);
+  if (isPromptOnly) {
+    return await handlePromptOnlySubmission(event, existingJob);
   }
 
   if (requestType === "MOTION_CONTROL") {

@@ -61,6 +61,7 @@ const mapUserRequestUsageRow = (item) => ({
   story_type: item.story_type ?? null,
   language: item.language ?? null,
   duration_seconds: item.duration_seconds ?? null,
+  prompt_only: item.prompt_only ?? null,
 });
 
 const parseImageBase64 = (raw) => {

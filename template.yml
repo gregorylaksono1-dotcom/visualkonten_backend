@@ -159,6 +159,10 @@ Parameters:
     Type: String
     Description: S3 Serve URL untuk bundle React Remotion Motion Graphics
     Default: https://remotionlambda-xxx.s3.amazonaws.com/sites/motion-graphics-site/index.html
+  CloudFrontMediaDomain:
+    Type: String
+    Description: CloudFront domain URL for S3 media assets (e.g. https://d2hkfwmbvbfxu4.cloudfront.net)
+    Default: ''
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -178,6 +182,9 @@ Globals:
   Function:
     Timeout: 10
     MemorySize: 128
+    Environment:
+      Variables:
+        CLOUDFRONT_MEDIA_DOMAIN: !Ref CloudFrontMediaDomain
 Conditions:
   UseCognitoCustomDomain:
     Fn::Not:
@@ -531,6 +538,8 @@ Resources:
           FREE_TRIAL_FUNCTION_NAME:
             Ref: FreeTrialWorkerFunction
           MOTION_GRAPHICS_STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-MotionGraphics${EnvironmentSuffix}
+          CLOUDFRONT_MEDIA_DOMAIN:
+            Ref: CloudFrontMediaDomain
       Events:
         GetUser:
           Type: Api
@@ -909,6 +918,8 @@ Resources:
           TableName: !Ref PricingTable
       - DynamoDBCrudPolicy:
           TableName: !Ref ProfileTable
+      - DynamoDBCrudPolicy:
+          TableName: !Ref TopupCreditTable
       - AWSLambdaBasicExecutionRole
       - Version: '2012-10-17'
         Statement:
@@ -945,6 +956,8 @@ Resources:
         Variables:
           PROFILE_TABLE_NAME:
             Ref: ProfileTable
+          TOPUP_CREDIT_TABLE_NAME:
+            Ref: TopupCreditTable
           CONFIG_SSM_PATH:
             Ref: ConfigSsmPath
           USER_REQUEST_TABLE_NAME:
@@ -1322,6 +1335,40 @@ Resources:
             Description: Recover stalled jobs and retry concurrency failures
             Enabled: true
 
+  CleanupUserRequestCronFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: cleanupUserRequestCron.handler
+      Runtime: nodejs22.x
+      Timeout: 900
+      MemorySize: 512
+      Architectures:
+      - x86_64
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: UserRequestTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: S3ResourceBucketName
+      Environment:
+        Variables:
+          USER_REQUEST_TABLE_NAME:
+            Ref: UserRequestTable
+          S3_RESOURCE_BUCKET:
+            Ref: S3ResourceBucketName
+          CONFIG_SSM_PATH:
+            Ref: ConfigSsmPath
+          FORCE_SEND_TELEGRAM: "true"
+      Events:
+        DailyCleanupCronEvent:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 17 * * ? *)
+            Description: Daily cleanup of user requests older than 1 month and their S3 assets (Runs at 00:00 WIB / 17:00 UTC)
+            Enabled: true
+
   VideoGenerationStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -1362,6 +1409,10 @@ Resources:
         - AWSLambda_FullAccess
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfileTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TopupCreditTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -1372,6 +1423,8 @@ Resources:
         Variables:
           SSM_PREFIX: !Ref ConfigSsmPath
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          PROFILE_TABLE_NAME: !Ref ProfileTable
+          TOPUP_CREDIT_TABLE_NAME: !Ref TopupCreditTable
           S3_RESOURCE_BUCKET_NAME: !Ref S3ResourceBucketName
           REMOTION_REGION: !Ref RemotionMotionGraphicsAwsRegion
           REMOTION_FUNCTION_NAME: !Ref RemotionMotionGraphicsFunctionName
@@ -1404,9 +1457,15 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref UserRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfileTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TopupCreditTable
       Environment:
         Variables:
           USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          PROFILE_TABLE_NAME: !Ref ProfileTable
+          TOPUP_CREDIT_TABLE_NAME: !Ref TopupCreditTable
       Events:
         StepFunctionFailure:
           Type: EventBridgeRule

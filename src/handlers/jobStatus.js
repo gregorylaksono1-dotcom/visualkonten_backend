@@ -1,6 +1,6 @@
 "use strict";
 
-const { s3Client, GetObjectCommand, getSignedUrl, batchGetJobStatus } = require("../services");
+const { batchGetJobStatus, resolveMediaUrl } = require("../services");
 const { response, getClaims, normalizeUserEmail, parseBody } = require("../utils");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET;
@@ -82,65 +82,32 @@ exports.handleBatchStatus = async (event) => {
                 out.llm_response = sanitizedLlm;
             }
 
-            // Helper to extract key
-            const extractS3Key = (urlOrKey) => {
-                if (!urlOrKey) return "";
-                const trimmed = urlOrKey.trim();
-                if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                    try {
-                        const parsed = new URL(trimmed);
-                        const host = parsed.hostname;
-                        if (host.includes(".s3.")) {
-                            return decodeURIComponent(parsed.pathname.substring(1));
-                        } else if (host === "s3.amazonaws.com" || host.startsWith("s3-") || host.startsWith("s3.")) {
-                            const parts = parsed.pathname.substring(1).split("/");
-                            return decodeURIComponent(parts.slice(1).join("/"));
-                        }
-                    } catch (e) {}
-                }
-                return decodeURIComponent(trimmed);
-            };
-
-            // Sign Thumbnail (Flux Image)
+            // Resolve Thumbnail (Flux Image)
             if (item.generated_image) {
                 try {
-                    const key = extractS3Key(item.generated_image);
-                    out.thumbnail_url = await getSignedUrl(s3Client, new GetObjectCommand({
-                        Bucket: S3_RESOURCE_BUCKET,
-                        Key: key
-                    }), { expiresIn: 3600 });
+                    out.thumbnail_url = await resolveMediaUrl(item.generated_image, 3600);
                 } catch (e) {
-                    console.error(`Error signing thumbnail for ${item.uuid}`, e);
+                    console.error(`Error resolving thumbnail for ${item.uuid}`, e);
                 }
             }
 
-            // Sign Result (Video or Final Image)
+            // Resolve Result (Video or Final Image)
             if (item.result_url && item.status === "COMPLETED") {
                 try {
-                    const key = extractS3Key(item.result_url);
-                    out.result_url = await getSignedUrl(s3Client, new GetObjectCommand({
-                        Bucket: S3_RESOURCE_BUCKET,
-                        Key: key
-                    }), { expiresIn: 3600 });
+                    out.result_url = await resolveMediaUrl(item.result_url, 3600);
                 } catch (e) {
-                    console.error(`Error signing result for ${item.uuid}`, e);
+                    console.error(`Error resolving result for ${item.uuid}`, e);
                 }
             }
 
-            // Sign Input Images (s3_keys)
+            // Resolve Input Images (s3_keys)
             if (Array.isArray(out.s3_keys) && out.s3_keys.length > 0) {
                 out.s3_keys = await Promise.all(out.s3_keys.map(async (key) => {
-                    if (key && !key.startsWith("http")) {
-                        try {
-                            return await getSignedUrl(s3Client, new GetObjectCommand({
-                                Bucket: S3_RESOURCE_BUCKET,
-                                Key: key
-                            }), { expiresIn: 3600 });
-                        } catch (e) {
-                            return key;
-                        }
+                    try {
+                        return await resolveMediaUrl(key, 3600);
+                    } catch (e) {
+                        return key;
                     }
-                    return key;
                 }));
             }
 

@@ -278,6 +278,150 @@ exports.handlePostResource = async (event) => {
     }
   }
 
+  if (body.action === "rerender_voiceover") {
+    const uuid = body.uuid;
+    if (!uuid) return response(400, { error: "uuid is required for rerender_voiceover action." });
+
+    try {
+      const getRes = await docClient.send(new GetCommand({
+        TableName: process.env.USER_REQUEST_TABLE_NAME,
+        Key: { uuid: uuid, user_email: userEmail },
+      }));
+      const requestItem = getRes.Item;
+      if (!requestItem) return response(404, { error: "Request not found." });
+
+      if (requestItem.user_id !== userId) {
+        return response(403, { error: "Forbidden: You do not own this request." });
+      }
+
+      if (requestItem.status === "PROCESSING" || requestItem.status === "VIDEO GENERATING" || requestItem.status === "SUBMITTING") {
+        return response(400, { error: "Video sedang dalam proses generasi." });
+      }
+
+      const videoScenes = requestItem.video_scenes || [];
+      if (!Array.isArray(videoScenes) || videoScenes.length === 0) {
+        return response(400, {
+          error: "Video tidak memiliki data scene yang tersimpan. Silakan lakukan generasi video penuh terlebih dahulu."
+        });
+      }
+
+      const profileItem = await getCustomerProfile(userId);
+      const profileCreditBalance = Number(profileItem.credit_balance) || 0;
+      const RERENDER_CREDIT_COST = 4; // Flat 4 kredit untuk re-render TTS + merge + post-production
+
+      if (profileCreditBalance < RERENDER_CREDIT_COST) {
+        return response(402, {
+          error: "Kredit tidak mencukupi. Dibutuhkan 4 kredit untuk render ulang voiceover.",
+          error_code: "INSUFFICIENT_CREDIT",
+          required_credit: RERENDER_CREDIT_COST,
+          current_credit: profileCreditBalance,
+        });
+      }
+
+      const now = getJakartaISOString();
+      const previousHistory = Array.isArray(requestItem.rerender_history) ? requestItem.rerender_history : [];
+      const putItem = {
+        ...requestItem,
+        status: "PROCESSING",
+        updated_at: now,
+        video_gen_start_at: now,
+        credit_amount: (Number(requestItem.credit_amount) || 0) + RERENDER_CREDIT_COST,
+        rerender_count: (Number(requestItem.rerender_count) || 0) + 1,
+        rerender_credit_amount: (Number(requestItem.rerender_credit_amount) || 0) + RERENDER_CREDIT_COST,
+        rerender_history: [
+          ...previousHistory,
+          {
+            type: "voiceover",
+            credit_spent: RERENDER_CREDIT_COST,
+            timestamp: now,
+            previous_script: requestItem.llm_response?.tts_script || requestItem.llm_response?.voiceover_script?.tts_script || requestItem.llm_response?.voiceover_script?.script || null
+          }
+        ],
+        ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
+      };
+
+      // Invalidate audio lama dan result_url agar diproduksi baru
+      delete putItem.audio;
+      delete putItem.audio_duration;
+      delete putItem.result_url;
+
+      // Merge naskah voiceover baru ke dalam llm_response
+      const existingLlm = requestItem.llm_response ? JSON.parse(JSON.stringify(requestItem.llm_response)) : {};
+      const newLlm = body.llm_response || {};
+
+      if (newLlm.tts_script !== undefined) existingLlm.tts_script = newLlm.tts_script;
+      if (newLlm.voiceover_script !== undefined) {
+        if (typeof newLlm.voiceover_script === "string") {
+          existingLlm.voiceover_script = {
+            tts_script: newLlm.voiceover_script,
+            script: newLlm.voiceover_script.replace(/^\[fast\]\s*/, "")
+          };
+        } else if (typeof newLlm.voiceover_script === "object") {
+          existingLlm.voiceover_script = {
+            ...existingLlm.voiceover_script,
+            ...newLlm.voiceover_script
+          };
+        }
+      }
+      if (body.tts_script) {
+        existingLlm.tts_script = body.tts_script;
+        if (!existingLlm.voiceover_script) existingLlm.voiceover_script = {};
+        existingLlm.voiceover_script.tts_script = body.tts_script;
+        existingLlm.voiceover_script.script = body.tts_script.replace(/^\[fast\]\s*/, "");
+      }
+
+      putItem.llm_response = existingLlm;
+
+      const errRes = await executeResourceRequestTransaction({
+        putItem,
+        finalAmount: RERENDER_CREDIT_COST,
+        userId,
+        requestType: requestItem.request_type,
+        now,
+        isFreeTrialUsed: false
+      });
+      if (errRes) return errRes;
+
+      const jobPayload = {
+        action: "rerender_voiceover",
+        jobId: uuid,
+        userEmail,
+        userId,
+        requestType: requestItem.request_type,
+        pricing_type: requestItem.pricing_type || null,
+        prompt: requestItem.prompt,
+        videoQuality: requestItem.video_quality || "720p",
+        aspectRatio: requestItem.aspect_ratio || "9:16",
+        llm_response: existingLlm,
+        duration_seconds: requestItem.duration_seconds || null,
+        preview: false
+      };
+
+      if (GENERATION_MANUAL === "true") {
+        return response(200, {
+          message: "Penyimpanan berhasil. Proses generasi menyesuaikan jam operasional max 8 jam.",
+          data: { ...putItem }
+        });
+      }
+
+      if (GENERATION_BACKEND === "comfyui") {
+        await invokeComfyUI(uuid, jobPayload);
+      } else {
+        return response(500, {
+          error: "Generation backend tidak didukung.",
+        });
+      }
+
+      return response(200, {
+        message: "Proses render ulang voiceover dimulai.",
+        data: { ...putItem }
+      });
+    } catch (err) {
+      console.error("rerender_voiceover action error:", err);
+      return response(500, { error: err.message });
+    }
+  }
+
   let prompt = String(body.prompt || "").trim();
   const imageBase64_1 = body.image_base64_1 || body.image_base_64_1 || body.image_base64 || "";
   const imageBase64_2 = body.image_base64_2 || body.image_base_64_2 || "";

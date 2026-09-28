@@ -19,7 +19,7 @@ const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, GetCommand } = requ
 const { getJakartaISOString } = require("./utils");
 const {
   callOpenAILLM, callGeminiAudio, uploadToS3,
-  s3Client
+  s3Client, refundUserCredit
 } = require("./services");
 const { generateImageOpenAI } = require("./core/imageGenerationOpenAI");
 const { generateTTS } = require("./core/tts");
@@ -83,7 +83,42 @@ const updateDynamoStatus = async (jobId, userEmail, status, { resultUrl, comfyPr
       }
     }
   } catch (err) {
-    console.error("[Kie.ai Worker] Dynamo update error:", err.message);
+    console.error("[Worker] DynamoDB status update error:", err);
+  }
+};
+
+const refundJobCredits = async (jobData = {}, userId) => {
+  let targetJob = jobData || {};
+  const jobId = targetJob.uuid || targetJob.jobId;
+  const userEmail = targetJob.user_email || targetJob.userEmail;
+
+  if (jobId && userEmail && (!targetJob.credit_amount && !targetJob.preview_credit_amount)) {
+    try {
+      const jobGet = await dynamo.send(new GetCommand({
+        TableName: USER_REQUEST_TABLE,
+        Key: { uuid: jobId, user_email: userEmail }
+      }));
+      if (jobGet.Item) {
+        targetJob = { ...targetJob, ...jobGet.Item };
+      }
+    } catch (err) {
+      console.error("[Worker] Error refreshing job for refund:", err.message);
+    }
+  }
+
+  const targetUserId = userId || targetJob.user_id || targetJob.userId;
+  const refundAmount = (Number(targetJob.credit_amount) || 0) + (Number(targetJob.preview_credit_amount) || 0);
+  const isPreview = Boolean(targetJob.preview);
+  const isFreeTrial = Number(targetJob.free_trial) === 1 && !isPreview;
+  const isFreePreview = isPreview && Number(targetJob.free_trial) === 1;
+
+  if (targetUserId && (refundAmount > 0 || isFreeTrial || isFreePreview)) {
+    try {
+      console.log(`[Worker] Refunding credits to user ${targetUserId} due to ERROR_LLM: amount=${refundAmount}, freeTrial=${isFreeTrial}, freePreview=${isFreePreview}`);
+      await refundUserCredit(targetUserId, refundAmount, isFreeTrial, isFreePreview);
+    } catch (refundErr) {
+      console.error(`[Worker] Failed to refund credits for user ${targetUserId}:`, refundErr.message);
+    }
   }
 };
 
@@ -282,6 +317,13 @@ const generateLLMPrompt = async (event) => {
         console.log(`[Worker] Dynamic LLM response generated successfully for type: ${requestType}.`);
       } catch (err) {
         console.error(`[Worker] Error executing generic template handler for job ${jobId} (Type: ${requestType}):`, err);
+        if (err.name === "LLMPolicyRejectionError" || err.message?.includes("LLMPolicyRejectionError")) {
+          await updateDynamoStatus(jobId, userEmail, "ERROR_LLM", { 
+            error_message: err.message,
+            llm_reason: err.message
+          });
+          await refundJobCredits({ ...data, ...existingJob }, data.userId || existingJob.user_id);
+        }
         await sendTelegramMessage(`${userEmail} error_llm ${err.message}`).catch(console.error);
         throw err;
       }
@@ -393,6 +435,8 @@ const generateLLMPrompt = async (event) => {
           llm_reason: reason
         });
         
+        await refundJobCredits({ ...data, ...existingJob }, data.userId || existingJob.user_id);
+        
         await sendTelegramMessage(`${userEmail} error_llm ${reason}`).catch(console.error);
         
         class LLMPolicyRejectionError extends Error {
@@ -490,6 +534,7 @@ const handlePromptOnlySubmission = async (event, existingJob) => {
         llm_reason: err.message,
         prompt_only: true
       });
+      await refundJobCredits(existingJob, existingJob.user_id);
       await sendTelegramMessage(`${userEmail} error_llm ${err.message}`).catch(console.error);
     } else {
       await updateDynamoStatus(jobId, userEmail, "FAILED", {
@@ -519,6 +564,29 @@ const handleSubmission = async (event) => {
   const isPromptOnly = Boolean(event.prompt_only || existingJob.prompt_only);
   if (isPromptOnly) {
     return await handlePromptOnlySubmission(event, existingJob);
+  }
+
+  if (event.action === "rerender_voiceover") {
+    console.log(`[Worker] Starting rerender voiceover task for job ${jobId}`);
+    try {
+      await sendTelegramMessage(`user "${userEmail}" melakukan rerender voiceover untuk job ${jobId}`).catch(console.error);
+      const { triggerRerenderStateMachine } = require("./core/sfnOrchestrator");
+      await triggerRerenderStateMachine({
+        jobId,
+        userEmail: event.userEmail || existingJob.user_email,
+        userId: event.userId || existingJob.user_id,
+        llmResponse: event.llm_response || existingJob.llm_response,
+        videoSceneResults: (existingJob.video_scenes || []).map(s => ({ id: s.scene_id, s3key: s.s3_key || s.s3key })),
+        requestType: requestType || existingJob.request_type,
+        aspectRatio: event.aspectRatio || existingJob.aspect_ratio || "9:16"
+      });
+      console.log(`[Worker] Job ${jobId} rerender voiceover successfully handed over to Step Functions.`);
+      return;
+    } catch (err) {
+      console.error("[Worker] Rerender voiceover error:", err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: `Rerender failed: ${err.message}` });
+      return;
+    }
   }
 
   if (requestType === "MOTION_CONTROL") {

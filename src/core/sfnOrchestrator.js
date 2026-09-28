@@ -48,6 +48,7 @@ async function triggerStateMachine({
   }
 
   const executionInput = {
+    action: "generate",
     jobId,
     userEmail,
     userId: userId || "anonymous",
@@ -90,6 +91,58 @@ async function triggerStateMachine({
   }));
 
   console.log(`[SFN Orchestrator] Successfully triggered Step Function. ARN: ${sfnResult.executionArn}`);
+  return sfnResult.executionArn;
+}
+
+/**
+ * Trigger Step Function directly for voiceover rerender (bypassing LLM/images/scenes generation).
+ */
+async function triggerRerenderStateMachine({
+  jobId,
+  userEmail,
+  userId,
+  llmResponse,
+  videoSceneResults,
+  requestType,
+  aspectRatio
+}) {
+  if (!STATE_MACHINE_ARN) {
+    throw new Error("STATE_MACHINE_ARN environment variable is not set.");
+  }
+
+  const executionInput = {
+    action: "rerender_voiceover",
+    jobId,
+    userEmail,
+    userId: userId || "anonymous",
+    llm_response: llmResponse,
+    videoSceneResults: Array.isArray(videoSceneResults) ? videoSceneResults : [],
+    request_type: requestType,
+    aspect_ratio: aspectRatio || "9:16",
+    audio: null,
+    audio_duration: null
+  };
+
+  console.log(`[SFN Orchestrator] Starting Rerender Voiceover Step Function for Job ${jobId}`);
+  const sfnResult = await sfnClient.send(new StartExecutionCommand({
+    stateMachineArn: STATE_MACHINE_ARN,
+    name: `rerender-${jobId}-${Date.now()}`,
+    input: JSON.stringify(executionInput)
+  }));
+
+  await dynamo.send(new UpdateCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { uuid: jobId, user_email: userEmail },
+    UpdateExpression: "SET #s = :status, sfn_execution_arn = :arn, updated_at = :now",
+    ExpressionAttributeNames: { "#s": "status" },
+    ExpressionAttributeValues: {
+      ":status": "PROCESSING",
+      ":arn": sfnResult.executionArn,
+      ":now": getJakartaISOString()
+    }
+  }));
+
+  console.log(`[SFN Orchestrator] Successfully triggered Rerender Voiceover Step Function. ARN: ${sfnResult.executionArn}`);
   return sfnResult.executionArn;
 }
 
@@ -605,12 +658,24 @@ async function mergeVideoScenes(payload) {
   const ffmpegCmd = await ensureFfmpegBinary();
 
   try {
-    for (let i = 0; i < videoSceneResults.length; i++) {
-      const resultStr = videoSceneResults[i];
+    let resultsToMerge = videoSceneResults;
+    if (!Array.isArray(resultsToMerge) || resultsToMerge.length === 0) {
+      if (Array.isArray(job.video_scenes) && job.video_scenes.length > 0) {
+        resultsToMerge = job.video_scenes.map(s => ({
+          id: s.scene_id,
+          s3key: s.s3_key || s.s3key
+        }));
+      } else {
+        resultsToMerge = [];
+      }
+    }
+
+    for (let i = 0; i < resultsToMerge.length; i++) {
+      const resultStr = resultsToMerge[i];
       const parsedRes = typeof resultStr === "string" ? JSON.parse(resultStr) : resultStr;
       
       const sceneNum = i + 1;
-      const s3key = parsedRes.s3key;
+      const s3key = parsedRes.s3key || parsedRes.s3_key;
       if (!s3key) throw new Error(`Missing S3 key for scene ${sceneNum}`);
 
       // Resolve signed URL
@@ -874,6 +939,7 @@ async function updateStatusPreview(payload) {
 
 module.exports = {
   triggerStateMachine,
+  triggerRerenderStateMachine,
   triggerManualRedrive,
   prepareJobData,
   submitLockImage,

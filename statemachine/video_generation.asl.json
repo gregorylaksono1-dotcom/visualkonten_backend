@@ -1,7 +1,27 @@
 {
   "Comment": "Bikinbik.in Video Generation Workflow using Step Functions",
-  "StartAt": "GenerateLLMPrompt",
+  "StartAt": "CheckWorkflowMode",
   "States": {
+    "CheckWorkflowMode": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.action",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.action",
+              "StringEquals": "rerender_voiceover"
+            }
+          ],
+          "Next": "MergeVideoScenes"
+        }
+      ],
+      "Default": "GenerateLLMPrompt"
+    },
+
     "GenerateLLMPrompt": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",

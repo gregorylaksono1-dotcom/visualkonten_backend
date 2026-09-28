@@ -47,6 +47,62 @@ const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const S3_RESOURCE_BUCKET = bucketName;
 const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_REDIS_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const CLOUDFRONT_MEDIA_DOMAIN = (process.env.CLOUDFRONT_MEDIA_DOMAIN || "").trim().replace(/\/+$/, "");
+
+/**
+ * Resolves a media key or S3 URL into a CloudFront URL (if configured)
+ * or falls back to S3 presigned URL.
+ * 
+ * @param {string} val S3 Key or existing URL
+ * @param {number} expiresIn Expiry in seconds if presigned fallback is used
+ * @returns {Promise<string|null>}
+ */
+const resolveMediaUrl = async (val, expiresIn = 3600) => {
+  if (!val || typeof val !== "string") return val;
+  const trimmed = val.trim();
+  if (!trimmed) return val;
+
+  let cleanKey = trimmed;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      const parsed = new URL(trimmed);
+      const host = parsed.hostname.toLowerCase();
+      // If it's already a CloudFront URL, return as is
+      if (host.includes("cloudfront.net")) {
+        return trimmed;
+      }
+      // If it's an S3 URL, extract key
+      if (host.includes(".s3.") || host.startsWith("s3.") || host.includes("amazonaws.com")) {
+        let p = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+        if (S3_RESOURCE_BUCKET && p.startsWith(S3_RESOURCE_BUCKET + "/")) {
+          p = p.substring(S3_RESOURCE_BUCKET.length + 1);
+        }
+        cleanKey = p;
+      } else {
+        return trimmed;
+      }
+    } catch (e) {
+      return trimmed;
+    }
+  }
+
+  cleanKey = decodeURIComponent(cleanKey).replace(/^\/+/, "");
+  if (!cleanKey) return trimmed;
+
+  if (CLOUDFRONT_MEDIA_DOMAIN) {
+    return `${CLOUDFRONT_MEDIA_DOMAIN}/${cleanKey}`;
+  }
+
+  try {
+    return await getSignedUrl(s3Client, new GetObjectCommand({
+      Bucket: S3_RESOURCE_BUCKET,
+      Key: cleanKey
+    }), { expiresIn });
+  } catch (err) {
+    console.error("resolveMediaUrl error:", err.message);
+    return trimmed;
+  }
+};
 
 // Redis Singleton
 let _redis;
@@ -635,18 +691,29 @@ const executeResourceRequestTransaction = async ({ putItem, finalAmount, userId,
   }
 };
 
-const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false) => {
-  if (!creditAmount) return;
+const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false, isFreePreviewUsed = false) => {
+  if (!creditAmount && !isFreeTrialUsed && !isFreePreviewUsed) return;
   const updates = [];
-  const expressionAttributeValues = { ":c": Number(creditAmount), ":z": 0 };
+  const expressionAttributeValues = { ":z": 0 };
+
+  const numCredits = Number(creditAmount) || 0;
+  if (numCredits > 0) {
+    expressionAttributeValues[":c"] = numCredits;
+    updates.push("credit_balance = if_not_exists(credit_balance, :z) + :c");
+    updates.push("credit_usage = if_not_exists(credit_usage, :z) - :c");
+  }
 
   if (isFreeTrialUsed) {
     updates.push("free_trial = if_not_exists(free_trial, :z) + :one");
     expressionAttributeValues[":one"] = 1;
   }
 
-  updates.push("credit_balance = if_not_exists(credit_balance, :z) + :c");
-  updates.push("credit_usage = if_not_exists(credit_usage, :z) - :c");
+  if (isFreePreviewUsed) {
+    updates.push("free_preview_quota = if_not_exists(free_preview_quota, :z) + :one");
+    expressionAttributeValues[":one"] = 1;
+  }
+
+  if (updates.length === 0) return;
 
   try {
     await docClient.send(new UpdateCommand({
@@ -655,7 +722,7 @@ const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false) =
       UpdateExpression: "SET " + updates.join(", "),
       ExpressionAttributeValues: expressionAttributeValues
     }));
-    console.log(`[services] Refunded ${creditAmount} credits for user ${userId}`);
+    console.log(`[services] Refunded ${numCredits} credits (freeTrial=${isFreeTrialUsed}, freePreview=${isFreePreviewUsed}) for user ${userId}`);
 
     // Create transaction record for refund
     try {
@@ -667,7 +734,7 @@ const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false) =
           TableName: PROFILE_TABLE_NAME,
           Key: { user_id: String(userId), user_type: "CUSTOMER" },
         }));
-        const userEmail = getRes?.Item?.user_email || "unknown";
+        const userEmail = getRes?.Item?.email || getRes?.Item?.user_email || "unknown";
         await docClient.send(new PutCommand({
           TableName: topupTable,
           Item: {
@@ -676,7 +743,7 @@ const refundUserCredit = async (userId, creditAmount, isFreeTrialUsed = false) =
             user_id: String(userId),
             created_at: getJakartaISOString(),
             updated_at: getJakartaISOString(),
-            amount: Number(creditAmount),
+            amount: numCredits,
             total: 0,
             status: "REFUND",
           },
@@ -854,5 +921,7 @@ module.exports = {
   batchGetJobStatus,
   createTopupOrder,
   executeResourceRequestTransaction,
-  refundUserCredit
+  refundUserCredit,
+  CLOUDFRONT_MEDIA_DOMAIN,
+  resolveMediaUrl
 };

@@ -3,7 +3,8 @@
 const https = require("https");
 
 const ssmPath = process.env.CONFIG_SSM_PATH || "";
-const isDev = ssmPath.includes("/dev") || ssmPath === "" || ssmPath === "/visualkonten/dev";
+const forceEnv = process.env.FORCE_SEND_TELEGRAM === "true";
+const isDev = !forceEnv && (ssmPath.includes("/dev") || ssmPath === "" || ssmPath === "/visualkonten/dev");
 
 const TELEGRAM_TOKEN = "8611691550:AAF5omYCHcqn7-bulHn3HQPJ6b4-mWOLObU";
 const TELEGRAM_CHAT_ID = "7989331780";
@@ -11,9 +12,12 @@ const TELEGRAM_CHAT_ID = "7989331780";
 /**
  * Sends a raw text message to Telegram chat.
  * @param {string} text 
+ * @param {object} [options]
+ * @param {boolean} [options.force]
  */
-function sendTelegramMessage(text) {
-  if (isDev) {
+function sendTelegramMessage(text, options = {}) {
+  const shouldSkip = isDev && !options.force;
+  if (shouldSkip) {
     console.log("[Telegram] Disabled in dev environment. Skipped message:", text);
     return Promise.resolve(null);
   }

@@ -3,7 +3,7 @@ const path = require("path");
 const https = require("https");
 const { randomUUID } = require("crypto");
 const { response, getClaims, normalizeUserEmail, parseBody, parseImageBase64, extFromContentType, normalizeVideoQuality, normalizeAspectRatio, getJakartaISOString } = require("../utils");
-const { s3Client, GetObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, invokeMotionGraphicsStateMachine,  executeResourceRequestTransaction, docClient, GetCommand, UpdateCommand } = require("../services");
+const { s3Client, GetObjectCommand, PutObjectCommand, uploadToS3, getSignedUrl, resolvePricingRow, invokeFreeTrialWorker, invokeComfyUI, getCustomerProfile, invokeMotionGraphicsStateMachine, invokeAutoMotionStateMachine, executeResourceRequestTransaction, docClient, GetCommand, UpdateCommand } = require("../services");
 const { sendTelegramMessage } = require("../lib/telegram");
 
 const S3_RESOURCE_BUCKET = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
@@ -394,7 +394,8 @@ exports.handlePostResource = async (event) => {
         aspectRatio: requestItem.aspect_ratio || "9:16",
         llm_response: existingLlm,
         duration_seconds: requestItem.duration_seconds || null,
-        preview: false
+        preview: false,
+        post_production_applied: Boolean(requestItem.post_production_applied)
       };
 
       if (GENERATION_MANUAL === "true") {
@@ -422,11 +423,135 @@ exports.handlePostResource = async (event) => {
     }
   }
 
+  if (body.action === "apply_post_production" || body.action === "rerender_post_production") {
+    const uuid = body.uuid;
+    if (!uuid) return response(400, { error: "uuid is required for post-production action." });
+
+    try {
+      const getRes = await docClient.send(new GetCommand({
+        TableName: process.env.USER_REQUEST_TABLE_NAME,
+        Key: { uuid: uuid, user_email: userEmail },
+      }));
+      const requestItem = getRes.Item;
+      if (!requestItem) return response(404, { error: "Request not found." });
+
+      if (requestItem.user_id !== userId) {
+        return response(403, { error: "Forbidden: You do not own this request." });
+      }
+
+      if (requestItem.status === "PROCESSING" || requestItem.status === "VIDEO GENERATING" || requestItem.status === "SUBMITTING") {
+        return response(400, { error: "Video sedang dalam proses generasi." });
+      }
+
+      const cleanVideoUrl = requestItem.clean_video_url || requestItem.result_url;
+      if (!cleanVideoUrl) {
+        return response(400, {
+          error: "Video belum memiliki file video dasar yang siap untuk post-production."
+        });
+      }
+
+      const profileItem = await getCustomerProfile(userId);
+      const profileCreditBalance = Number(profileItem.credit_balance) || 0;
+      const POST_PRODUCTION_CREDIT_COST = 2; // Flat 2 kredit untuk post-production
+
+      if (profileCreditBalance < POST_PRODUCTION_CREDIT_COST) {
+        return response(402, {
+          error: "Kredit tidak mencukupi. Dibutuhkan 2 kredit untuk menerapkan efek teks post-production.",
+          error_code: "INSUFFICIENT_CREDIT",
+          required_credit: POST_PRODUCTION_CREDIT_COST,
+          current_credit: profileCreditBalance,
+        });
+      }
+
+      const now = getJakartaISOString();
+      const previousHistory = Array.isArray(requestItem.rerender_history) ? requestItem.rerender_history : [];
+
+      const existingLlm = requestItem.llm_response ? JSON.parse(JSON.stringify(requestItem.llm_response)) : {};
+      if (body.post_production) {
+        existingLlm.post_production = body.post_production;
+      } else if (body.llm_response?.post_production) {
+        existingLlm.post_production = body.llm_response.post_production;
+      }
+
+      const putItem = {
+        ...requestItem,
+        status: "PROCESSING",
+        post_production_status: "PROCESSING",
+        updated_at: now,
+        credit_amount: (Number(requestItem.credit_amount) || 0) + POST_PRODUCTION_CREDIT_COST,
+        rerender_count: (Number(requestItem.rerender_count) || 0) + 1,
+        rerender_credit_amount: (Number(requestItem.rerender_credit_amount) || 0) + POST_PRODUCTION_CREDIT_COST,
+        rerender_history: [
+          ...previousHistory,
+          {
+            type: "post_production",
+            credit_spent: POST_PRODUCTION_CREDIT_COST,
+            timestamp: now,
+            overlays_count: existingLlm.post_production?.overlays?.length || 0
+          }
+        ],
+        llm_response: existingLlm,
+        clean_video_url: cleanVideoUrl
+      };
+
+      const errRes = await executeResourceRequestTransaction({
+        putItem,
+        finalAmount: POST_PRODUCTION_CREDIT_COST,
+        userId,
+        requestType: requestItem.request_type,
+        now,
+        isFreeTrialUsed: false
+      });
+      if (errRes) return errRes;
+
+      const jobPayload = {
+        action: "rerender_post_production",
+        jobId: uuid,
+        userEmail,
+        userId,
+        requestType: requestItem.request_type,
+        aspectRatio: requestItem.aspect_ratio || "9:16",
+        llm_response: existingLlm,
+        videoUrl: cleanVideoUrl,
+        post_production_applied: true
+      };
+
+      if (GENERATION_BACKEND === "comfyui") {
+        await invokeComfyUI(uuid, jobPayload);
+      } else {
+        return response(500, {
+          error: "Generation backend tidak didukung.",
+        });
+      }
+
+      return response(200, {
+        message: "Proses post-production dimulai.",
+        data: { ...putItem }
+      });
+    } catch (err) {
+      console.error("post_production action error:", err);
+      return response(500, { error: err.message });
+    }
+  }
+
   let prompt = String(body.prompt || "").trim();
   const imageBase64_1 = body.image_base64_1 || body.image_base_64_1 || body.image_base64 || "";
   const imageBase64_2 = body.image_base64_2 || body.image_base_64_2 || "";
   const hasImage = Boolean(imageBase64_1.trim() || imageBase64_2.trim());
-  const resourceFamily = String(body.resource_family || "image").toLowerCase() === "video" ? "video" : "image";
+  const isAutoMotionReq = String(body.request_type || "").toUpperCase() === "AUTO_MOTION" ||
+                          String(body.request_type || "").toUpperCase() === "AUTO-MOTION" ||
+                          String(body.request_type || "").toUpperCase() === "KINETIC_AUTO_MOTION" ||
+                          String(body.pricing_key || "").toUpperCase() === "KINETIC_AUTO_MOTION" ||
+                          String(body.request_type || "").toUpperCase() === "EDITORIAL_GLOW_AUTO_MOTION" ||
+                          String(body.pricing_key || "").toUpperCase() === "EDITORIAL_GLOW_AUTO_MOTION" ||
+                          String(body.request_type || "").toUpperCase() === "CANVAS_EXPLAIN_AUTO_MOTION" ||
+                          String(body.pricing_key || "").toUpperCase() === "CANVAS_EXPLAIN_AUTO_MOTION" ||
+                          String(body.request_type || "").toUpperCase().endsWith("_AUTO_MOTION") ||
+                          String(body.pricing_key || "").toUpperCase().endsWith("_AUTO_MOTION") ||
+                          body.itemType === "auto-motion" ||
+                          body.itemType === "auto_motion";
+
+  const resourceFamily = (String(body.resource_family || "").toLowerCase() === "video" || isAutoMotionReq) ? "video" : "image";
   const isFreeTrialRequested = body.free_trial === true || String(body.free_trial).toLowerCase() === "true" || body.request_type === "FREE-TRIAL";
   let isPreview = body.preview === true || String(body.preview).toLowerCase() === "true";
   let requestType = body.request_type;
@@ -441,7 +566,10 @@ exports.handlePostResource = async (event) => {
   const aspectRatio = normalizeAspectRatio(body.aspect_ratio);
   const videoOptions = resourceFamily === "video" ? { video_quality: videoQuality, aspect_ratio: aspectRatio } : {};
 
-  if (resourceFamily === "video") {
+  if (isAutoMotionReq) {
+    pricingKey = body.pricing_key || body.request_type || "KINETIC_AUTO_MOTION";
+    requestType = pricingKey;
+  } else if (resourceFamily === "video") {
     if (isFreeTrialRequested) {
       requestType = "FREE-TRIAL";
       pricingKey = "FREE-TRIAL";
@@ -473,16 +601,12 @@ exports.handlePostResource = async (event) => {
   }
 
   const isPromptOnly = body.prompt_only === true || body.prompt_only === "true" || body.mode === "prompt_only";
-
-  if (isPreview) {
-    const rTypeUpper = String(requestType || "").toUpperCase();
-    // No longer override pricingKey to "PREVIEW" here, we want the template's normal pricing row 
-    // to determine if preview has a cost (like FREE_STORY has a 3 credit preview price), 
-    // or default to 0 if not specified.
-  }
+  const requestTypeUpperVal = String(requestType || "").toUpperCase();
 
   if (!prompt && requestType === "MOTION_CONTROL") {
     prompt = "MOTION_CONTROL";
+  } else if (!prompt && isAutoMotionReq) {
+    prompt = body.caption || body.brand || "Auto Motion Talking Head";
   }
 
   if (!prompt) return response(400, { error: "prompt is required." });
@@ -501,8 +625,14 @@ exports.handlePostResource = async (event) => {
     }
   }
 
-  const pricing = await resolvePricingRow(pricingKey);
-  if (!pricing) return response(404, { error: `Pricing not found for ${pricingKey}.` });
+  let pricing = await resolvePricingRow(pricingKey);
+  if (!pricing) {
+    if (isAutoMotionReq) {
+      pricing = { amount: 30, item: { key: pricingKey || "KINETIC_AUTO_MOTION", type: "auto_motion", prompt: "" } };
+    } else {
+      return response(404, { error: `Pricing not found for ${pricingKey}.` });
+    }
+  }
 
   if (pricing.item.coming_soon === true || pricing.item.coming_soon === "true") {
     return response(400, { error: "Template ini belum siap untuk diproses (Coming Soon)." });
@@ -514,8 +644,23 @@ exports.handlePostResource = async (event) => {
   let appliedFreeTrialPricing = false;
 
   let finalAmount = pricing.amount;
-  const requestTypeUpperVal = String(requestType || "").toUpperCase();
-  if (isPromptOnly && requestTypeUpperVal === "FREE_STORY") {
+  if (isAutoMotionReq) {
+    let parsedAttr = null;
+    try {
+      parsedAttr = typeof pricing.item?.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item?.attr;
+    } catch (e) { }
+    const rawDur = Number(body.video_duration || body.duration_seconds || body.duration || 30);
+    if (parsedAttr && typeof parsedAttr === "object") {
+      // Tier: 30-40s uses key "30" (e.g. 34), 40-60s uses key "60" (e.g. 61)
+      if (rawDur <= 40 && parsedAttr["30"] !== undefined) {
+        finalAmount = Number(parsedAttr["30"]);
+      } else if (rawDur > 40 && parsedAttr["60"] !== undefined) {
+        finalAmount = Number(parsedAttr["60"]);
+      } else if (parsedAttr["30"] !== undefined) {
+        finalAmount = Number(parsedAttr["30"]);
+      }
+    }
+  } else if (isPromptOnly && requestTypeUpperVal === "FREE_STORY") {
     let parsedAttr = null;
     try {
       parsedAttr = typeof pricing.item.attr === "string" ? JSON.parse(pricing.item.attr) : pricing.item.attr;
@@ -658,9 +803,7 @@ exports.handlePostResource = async (event) => {
     });
   }
 
-    if (requestType === "MOTION_GRAPHICS" || requestType === "MOTION-GRAPHICS" || body.itemType === "motion-graphics") {
-      await invokeMotionGraphicsStateMachine(requestId, jobPayload);
-    } else if (requestType === "FREE-TRIAL") {
+    if (requestType === "FREE-TRIAL") {
     const freeTrial = Number(profileItem.free_trial || 0);
     if (!(freeTrial > 0)) {
       return response(402, { error: "Akses Tester sudah terpakai", error_code: "FREE_TRIAL_UNAVAILABLE" });
@@ -688,9 +831,13 @@ exports.handlePostResource = async (event) => {
     }
   }
 
-  // Parse and upload reference video if present (for MOTION_CONTROL)
-  const videoBase64 = body.video_base_64 || "";
-  let videoRefKey = null;
+  // Parse and upload reference video if present (for MOTION_CONTROL or AUTO_MOTION)
+  let videoRefKey = body.video_ref_key || body.videoKey || body.video_key || null;
+  if (videoRefKey && !s3Keys.includes(videoRefKey)) {
+    s3Keys.push(videoRefKey);
+  }
+
+  const videoBase64 = body.video_base_64 || body.videoBase64 || "";
   if (videoBase64.trim()) {
     const parsed = parseImageBase64(videoBase64);
     if (parsed) {
@@ -705,13 +852,32 @@ exports.handlePostResource = async (event) => {
     }
   }
 
+  const autoMotionTemplateId = isAutoMotionReq ? (
+    body.templateId || pricing.item?.templateId || pricing.item?.template || (
+      pricing.item?.key === "EDITORIAL_GLOW_AUTO_MOTION" || body.pricing_key === "EDITORIAL_GLOW_AUTO_MOTION" || requestType === "EDITORIAL_GLOW_AUTO_MOTION" ? "editorial-glow-v1" :
+      pricing.item?.key === "CANVAS_EXPLAIN_AUTO_MOTION" || body.pricing_key === "CANVAS_EXPLAIN_AUTO_MOTION" || requestType === "CANVAS_EXPLAIN_AUTO_MOTION" ? "canvas-explain-v1" :
+      "kinetic-v1"
+    )
+  ) : (body.templateId || null);
+
+  const autoMotionPricingKey = pricing.item?.key || body.pricing_key || requestType || (
+    isAutoMotionReq ? (
+      autoMotionTemplateId === "editorial-glow-v1" ? "EDITORIAL_GLOW_AUTO_MOTION" :
+      autoMotionTemplateId === "canvas-explain-v1" ? "CANVAS_EXPLAIN_AUTO_MOTION" :
+      "KINETIC_AUTO_MOTION"
+    ) : requestType
+  );
+  const isKineticTemplate = autoMotionTemplateId === "kinetic-v1";
+  const resolvedUseCutout = isAutoMotionReq ? (isKineticTemplate ? (body.useCutout !== undefined ? body.useCutout : true) : false) : undefined;
+
   const putItem = {
     uuid: requestId, user_id: String(userId), user_email: userEmail,
     request_type: requestType, prompt, 
-    resource_family: resourceFamily, status: "SUBMITTING", 
+    resource_family: isAutoMotionReq ? "video" : resourceFamily, status: "SUBMITTING", 
     ...(isPreview ? { preview_credit_amount: finalAmount } : { credit_amount: finalAmount }),
-    pricing_type: pricing.item.type, created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
-    ugc_mode: body.ugc_mode || null,
+    pricing_type: pricing.item?.type || (isAutoMotionReq ? "auto_motion" : null),
+    created_at: now, updated_at: now, s3_keys: s3Keys, ...videoOptions,
+    ugc_mode: body.ugc_mode || (isAutoMotionReq ? "auto-motion" : null),
     store_type: body.store_type || null,
     story_type: body.story_type || null,
     language: body.language || "id",
@@ -721,7 +887,14 @@ exports.handlePostResource = async (event) => {
     prompt_only: isPromptOnly === true,
     video_gen_start_at: (isPreview || isPromptOnly) ? null : now,
     ...(videoRefKey ? { video_ref_key: videoRefKey } : {}),
-    ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {})
+    ...(GENERATION_MANUAL === "true" ? { generation_manual: true } : {}),
+    pricing_key: autoMotionPricingKey,
+    ...(autoMotionTemplateId ? { template_id: autoMotionTemplateId } : {}),
+    ...(isAutoMotionReq ? {
+      framing: body.framing || "safe",
+      brand: body.brand || "",
+      use_cutout: resolvedUseCutout
+    } : {})
   };
 
   const errRes = await executeResourceRequestTransaction({
@@ -759,7 +932,21 @@ exports.handlePostResource = async (event) => {
     preview: isPreview,
     prompt_only: isPromptOnly === true,
     video_ref_key: videoRefKey,
-    duration_seconds: body.duration_seconds || 5
+    duration_seconds: body.duration_seconds || 5,
+    pricingPrompt: pricing.item?.prompt || null,
+    pricing_prompt: pricing.item?.prompt || null,
+    ...(isAutoMotionReq ? {
+      framing: body.framing || "safe",
+      brand: body.brand || "",
+      useCutout: resolvedUseCutout,
+      pricingKey: autoMotionPricingKey,
+      pricing_key: autoMotionPricingKey,
+      templateId: autoMotionTemplateId
+    } : {
+      pricingKey: pricing.item?.key || requestType,
+      pricing_key: pricing.item?.key || requestType,
+      ...(body.templateId ? { templateId: body.templateId } : {})
+    })
   };
 
   if (GENERATION_MANUAL === "true") {
@@ -774,6 +961,21 @@ exports.handlePostResource = async (event) => {
     if (pricing.item.type === "motion_graphic" || requestType === "MOTION_GRAPHICS" || requestType === "MOTION-GRAPHICS" || body.itemType === "motion-graphics") {
       console.log("=== ROUTING TO MOTION GRAPHICS STATE MACHINE ===", JSON.stringify(jobPayload, null, 2));
       await invokeMotionGraphicsStateMachine(requestId, jobPayload);
+    } else if (
+      pricing.item.type === "auto_motion" ||
+      pricing.item.type === "auto-motion" ||
+      requestType === "AUTO_MOTION" ||
+      requestType === "AUTO-MOTION" ||
+      pricing.item.key === "KINETIC_AUTO_MOTION" ||
+      pricing.item.key === "EDITORIAL_GLOW_AUTO_MOTION" ||
+      pricing.item.key === "CANVAS_EXPLAIN_AUTO_MOTION" ||
+      String(pricing.item.key || "").endsWith("_AUTO_MOTION") ||
+      String(requestType || "").endsWith("_AUTO_MOTION") ||
+      body.itemType === "auto-motion" ||
+      body.itemType === "auto_motion"
+    ) {
+      console.log("=== ROUTING TO AUTO MOTION STATE MACHINE ===", JSON.stringify(jobPayload, null, 2));
+      await invokeAutoMotionStateMachine(requestId, jobPayload);
     } else if (requestType === "FREE-TRIAL") {
       await invokeFreeTrialWorker(requestId, jobPayload);
     } else if (GENERATION_BACKEND === "comfyui") {
@@ -795,10 +997,31 @@ exports.handleGetPresigned = async (event) => {
   if (!claims.sub) return response(401, { error: "Unauthorized." });
 
   const qs = event.queryStringParameters || {};
-  const key = qs.key;
+  let key = qs.key;
   if (!key) return response(400, { error: "key is required." });
 
+  key = key.trim();
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    try {
+      const urlObj = new URL(key);
+      let p = decodeURIComponent(urlObj.pathname.replace(/^\/+/, ""));
+      if (S3_RESOURCE_BUCKET && p.startsWith(S3_RESOURCE_BUCKET + "/")) {
+        p = p.substring(S3_RESOURCE_BUCKET.length + 1);
+      }
+      key = p;
+    } catch (e) {}
+  } else if (key.startsWith("s3://")) {
+    key = key.replace(/^s3:\/\/[^\/]+\//, "");
+  }
+
   try {
+    if (qs.action === "upload" || qs.upload === "true") {
+      const contentType = qs.contentType || qs.content_type || "video/mp4";
+      const cmd = new PutObjectCommand({ Bucket: S3_RESOURCE_BUCKET, Key: key, ContentType: contentType });
+      const url = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+      return response(200, { data: { url, key } });
+    }
+
     const s3Params = { Bucket: S3_RESOURCE_BUCKET, Key: key };
     if (qs.download === "true") {
       const filename = qs.filename || key.split("/").pop() || "video.mp4";

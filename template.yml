@@ -163,6 +163,46 @@ Parameters:
     Type: String
     Description: CloudFront domain URL for S3 media assets (e.g. https://d2hkfwmbvbfxu4.cloudfront.net)
     Default: ''
+  AutoMotionRunpodUrl:
+    Type: String
+    Description: RunPod endpoint URL for Auto Motion GPU cutout (e.g. https://api.runpod.ai/v2/YOUR_ENDPOINT_ID)
+    Default: 'https://api.runpod.ai/v2/YOUR_ENDPOINT_ID'
+  RemotionAutoMotionFunctionName:
+    Type: String
+    Description: Lambda Function Name untuk Remotion Auto Motion
+    Default: 'remotion-render-4-0-504-mem5120mb-disk5120mb-900sec'
+  RemotionAutoMotionServeUrl:
+    Type: String
+    Description: S3 Serve URL untuk bundle React Remotion Auto Motion
+    Default: 'https://remotionlambda-xxx.s3.amazonaws.com/sites/auto-motion-site/index.html'
+  AutoMotionDirectorProvider:
+    Type: String
+    Default: 'gemini'
+    AllowedValues:
+      - 'gemini'
+      - 'anthropic'
+      - 'openai'
+  AutoMotionDirectorModel:
+    Type: String
+    Default: 'gemini-3.7-flash'
+  AutoMotionWhisperProvider:
+    Type: String
+    Default: 'openai'
+    AllowedValues:
+      - 'openai'
+      - 'groq'
+  AutoMotionFfmpegLayerArn:
+    Type: String
+    Description: Optional FFmpeg layer ARN for Auto Motion Lambda
+    Default: ''
+  AutoMotionImageModel:
+    Type: String
+    Description: Model used for Auto Motion AI image B-roll generation
+    Default: 'nano-banana-2-lite'
+  AutoMotionVideoModel:
+    Type: String
+    Description: Model used for Auto Motion AI video B-roll generation
+    Default: 'bytedance/seedance-1.5-pro'
 Rules:
   CognitoCustomDomainNeedsHostname:
     RuleCondition:
@@ -186,6 +226,11 @@ Globals:
       Variables:
         CLOUDFRONT_MEDIA_DOMAIN: !Ref CloudFrontMediaDomain
 Conditions:
+  HasAutoMotionFfmpegLayer:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AutoMotionFfmpegLayerArn
+          - ''
   UseCognitoCustomDomain:
     Fn::Not:
     - Fn::Equals:
@@ -507,6 +552,7 @@ Resources:
           - states:StartExecution
           Resource:
           - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-MotionGraphics${EnvironmentSuffix}
+          - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-AutoMotion${EnvironmentSuffix}
       Environment:
         Variables:
           CONFIG_SSM_PATH:
@@ -538,6 +584,7 @@ Resources:
           FREE_TRIAL_FUNCTION_NAME:
             Ref: FreeTrialWorkerFunction
           MOTION_GRAPHICS_STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-MotionGraphics${EnvironmentSuffix}
+          AUTO_MOTION_STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-AutoMotion${EnvironmentSuffix}
           CLOUDFRONT_MEDIA_DOMAIN:
             Ref: CloudFrontMediaDomain
       Events:
@@ -709,24 +756,6 @@ Resources:
               Ref: Api
             Path: /hello
             Method: get
-            Auth:
-              Authorizer: NONE
-        MockKieAi:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /mock-kieai
-            Method: any
-            Auth:
-              Authorizer: NONE
-        MockKieAiProxy:
-          Type: Api
-          Properties:
-            RestApiId:
-              Ref: Api
-            Path: /mock-kieai/{proxy+}
-            Method: any
             Auth:
               Authorizer: NONE
     Metadata:
@@ -910,6 +939,11 @@ Resources:
       MemorySize: 1024
       Architectures:
       - x86_64
+      Layers:
+        Fn::If:
+          - HasAutoMotionFfmpegLayer
+          - - Ref: AutoMotionFfmpegLayerArn
+          - !Ref AWS::NoValue
       Policies:
       - DynamoDBCrudPolicy:
           TableName:
@@ -1671,6 +1705,162 @@ Resources:
         KeyType: HASH
       BillingMode: PAY_PER_REQUEST
 
+  AutoMotionPipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: auto-motion/cloud/build/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Timeout: 900
+      MemorySize: 5120
+      EphemeralStorage:
+        Size: 5120
+      Architectures:
+        - x86_64
+      Layers:
+        Fn::If:
+          - HasAutoMotionFfmpegLayer
+          - - Ref: AutoMotionFfmpegLayerArn
+          - !Ref AWS::NoValue
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonS3FullAccess
+        - AWSLambda_FullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PricingTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParameters
+                - ssm:GetParametersByPath
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: "*"
+      Environment:
+        Variables:
+          PIPELINE_BUCKET: !Ref S3ResourceBucketName
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          PRICING_TABLE_NAME: !Ref PricingTable
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
+          SSM_PREFIX: !Ref ConfigSsmPath
+          AUTOMOTION_RUNPOD_URL: !Ref AutoMotionRunpodUrl
+          RUNPOD_URL: !Ref AutoMotionRunpodUrl
+          REMOTION_AWS_REGION: !Ref RemotionAwsRegion
+          REMOTION_REGION: !Ref RemotionAwsRegion
+          REMOTION_FUNCTION_NAME: !Ref RemotionAutoMotionFunctionName
+          REMOTION_SERVE_URL: !Ref RemotionAutoMotionServeUrl
+          DIRECTOR_PROVIDER: !Ref AutoMotionDirectorProvider
+          DIRECTOR_MODEL: !Ref AutoMotionDirectorModel
+          WHISPER_PROVIDER: !Ref AutoMotionWhisperProvider
+          FFMPEG_PATH: /opt/bin/ffmpeg
+          FFPROBE_PATH: /opt/bin/ffprobe
+
+  AutoMotionImageGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/autoMotionMediaGenerators.generateImageHandler
+      Runtime: nodejs22.x
+      Timeout: 300
+      MemorySize: 1024
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource:
+                Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParameters
+                - ssm:GetParametersByPath
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          PIPELINE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          AUTOMOTION_IMAGE_MODEL: !Ref AutoMotionImageModel
+
+  AutoMotionVideoGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/autoMotionMediaGenerators.generateVideoHandler
+      Runtime: nodejs22.x
+      Timeout: 600
+      MemorySize: 1024
+      Architectures:
+        - x86_64
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource:
+                Fn::Sub: arn:aws:s3:::${S3ResourceBucketName}/*
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+                - ssm:GetParameters
+                - ssm:GetParametersByPath
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigSsmPath}/*'
+      Environment:
+        Variables:
+          CONFIG_SSM_PATH: !Ref ConfigSsmPath
+          S3_RESOURCE_BUCKET: !Ref S3ResourceBucketName
+          PIPELINE_BUCKET: !Ref S3ResourceBucketName
+          USER_REQUEST_TABLE_NAME: !Ref UserRequestTable
+          AUTOMOTION_VIDEO_MODEL: !Ref AutoMotionVideoModel
+
+  AutoMotionStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub BikinAi-AutoMotion${EnvironmentSuffix}
+      DefinitionUri: statemachine/auto_motion_flow.asl.json
+      DefinitionSubstitutions:
+        PipelineFunctionArn: !GetAtt AutoMotionPipelineFunction.Arn
+        ImageGeneratorFunctionArn: !GetAtt AutoMotionImageGeneratorFunction.Arn
+        VideoGeneratorFunctionArn: !GetAtt AutoMotionVideoGeneratorFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AutoMotionPipelineFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AutoMotionImageGeneratorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AutoMotionVideoGeneratorFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRequestTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PricingTable
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL for active stage
@@ -1721,6 +1911,9 @@ Outputs:
   VideoGenerationStateMachineArn:
     Description: ARN of the Step Functions Video Generation State Machine
     Value: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:BikinAi-VideoGeneration${EnvironmentSuffix}
+  AutoMotionStateMachineArn:
+    Description: ARN of the Step Functions Auto Motion State Machine
+    Value: !Ref AutoMotionStateMachine
 
 # sam build && sam deploy --config-env production --profile production --no-confirm-changeset 
 

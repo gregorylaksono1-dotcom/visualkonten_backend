@@ -150,9 +150,8 @@ exports.handler = async (event, context) => {
         customData: {
           taskToken,
           jobId,
-          originalBucket: bucketName,
-          originalKey: key,
-          originalUrl: event.videoUrl
+          bucket: bucketName,
+          key
         }
       } : undefined
     });

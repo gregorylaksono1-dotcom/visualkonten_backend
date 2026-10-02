@@ -60,6 +60,14 @@ const mapUserRequestUsageRow = (item) => ({
   review_text: item.review_text ?? null,
   story_type: item.story_type ?? null,
   language: item.language ?? null,
+  clean_video_url: item.clean_video_url ?? null,
+  post_production_status: item.post_production_status ?? null,
+  post_production_applied: item.post_production_applied ?? false,
+  post_production_history: item.post_production_history ?? null,
+  video_scenes: item.video_scenes ?? null,
+  rerender_count: item.rerender_count ?? 0,
+  rerender_credit_amount: item.rerender_credit_amount ?? 0,
+  rerender_history: item.rerender_history ?? null,
   duration_seconds: item.duration_seconds ?? null,
   prompt_only: item.prompt_only ?? null,
 });
@@ -116,7 +124,14 @@ const parseCreditsFromPricingItem = (item) => {
     if (parsedAttr && parsedAttr["720"] !== undefined) {
       const v = parsedAttr["720"];
       raw = typeof v === 'object' && v !== null ? (v.price || 0) : v;
+    } else if (parsedAttr && (parsedAttr["30"] !== undefined || parsedAttr["60"] !== undefined)) {
+      const v = parsedAttr["30"] ?? parsedAttr["60"];
+      raw = typeof v === 'object' && v !== null ? (v.price || 0) : v;
     }
+  }
+
+  if (raw && typeof raw === 'object') {
+    raw = raw.price ?? raw.amount ?? raw.credits ?? NaN;
   }
 
   if (raw === undefined || raw === null || raw === "") return NaN;

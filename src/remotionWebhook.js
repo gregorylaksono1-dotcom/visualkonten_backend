@@ -26,22 +26,23 @@ exports.handler = async (event) => {
       
       const outKey = body.outKey || (body.renderId ? `renders/${body.renderId}/out.mp4` : null);
 
-      if (customData.originalBucket && customData.originalKey && body.bucketName && outKey) {
-        console.log(`[RemotionWebhook] Copying output from ${body.bucketName}/${outKey} to ${customData.originalBucket}/${customData.originalKey}`);
+      const targetBucket = customData.bucket || customData.originalBucket;
+      const targetKey = customData.key || customData.originalKey;
+
+      if (targetBucket && targetKey && body.bucketName && outKey) {
+        const baseKey = targetKey.replace(/(_postprod.*|\.mp4$)/, "");
+        const postProdKey = `${baseKey}_postprod_${Date.now()}.mp4`;
+
+        console.log(`[RemotionWebhook] Copying output from ${body.bucketName}/${outKey} to ${targetBucket}/${postProdKey}`);
         try {
           const s3Client = new S3Client({ region: process.env.AWS_REGION || "ap-southeast-1" });
           await s3Client.send(new CopyObjectCommand({
-            Bucket: customData.originalBucket,
-            Key: customData.originalKey,
+            Bucket: targetBucket,
+            Key: postProdKey,
             CopySource: `${body.bucketName}/${encodeURI(outKey)}`
           }));
-          console.log(`[RemotionWebhook] Successfully overwritten original video at ${customData.originalBucket}/${customData.originalKey}`);
-          
-          if (customData.originalUrl) {
-            finalResultUrl = customData.originalUrl;
-          } else {
-            finalResultUrl = `https://${customData.originalBucket}.s3.${process.env.AWS_REGION || "ap-southeast-1"}.amazonaws.com/${customData.originalKey}`;
-          }
+          console.log(`[RemotionWebhook] Successfully saved post-production video at ${targetBucket}/${postProdKey}`);
+          finalResultUrl = postProdKey;
         } catch (copyErr) {
           console.error("[RemotionWebhook] Failed to copy S3 object:", copyErr);
           // Fallback to the remotion output URL if copy fails

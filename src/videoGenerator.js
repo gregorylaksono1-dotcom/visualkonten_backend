@@ -578,13 +578,36 @@ const handleSubmission = async (event) => {
         llmResponse: event.llm_response || existingJob.llm_response,
         videoSceneResults: (existingJob.video_scenes || []).map(s => ({ id: s.scene_id, s3key: s.s3_key || s.s3key })),
         requestType: requestType || existingJob.request_type,
-        aspectRatio: event.aspectRatio || existingJob.aspect_ratio || "9:16"
+        aspectRatio: event.aspectRatio || existingJob.aspect_ratio || "9:16",
+        post_production_applied: event.post_production_applied ?? existingJob.post_production_applied ?? false
       });
       console.log(`[Worker] Job ${jobId} rerender voiceover successfully handed over to Step Functions.`);
       return;
     } catch (err) {
       console.error("[Worker] Rerender voiceover error:", err);
       await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: `Rerender failed: ${err.message}` });
+      return;
+    }
+  }
+
+  if (event.action === "apply_post_production" || event.action === "rerender_post_production") {
+    console.log(`[Worker] Starting post-production task for job ${jobId}`);
+    try {
+      await sendTelegramMessage(`user "${userEmail}" melakukan post-production untuk job ${jobId}`).catch(console.error);
+      const { triggerPostProductionStateMachine } = require("./core/sfnOrchestrator");
+      await triggerPostProductionStateMachine({
+        jobId,
+        userEmail: event.userEmail || existingJob.user_email,
+        userId: event.userId || existingJob.user_id,
+        llmResponse: event.llm_response || existingJob.llm_response,
+        videoUrl: event.videoUrl || existingJob.clean_video_url || existingJob.result_url,
+        aspectRatio: event.aspectRatio || existingJob.aspect_ratio || "9:16"
+      });
+      console.log(`[Worker] Job ${jobId} post-production successfully handed over to Step Functions.`);
+      return;
+    } catch (err) {
+      console.error("[Worker] Post-production error:", err);
+      await updateDynamoStatus(jobId, userEmail, "FAILED", { error_message: `Post-production failed: ${err.message}` });
       return;
     }
   }

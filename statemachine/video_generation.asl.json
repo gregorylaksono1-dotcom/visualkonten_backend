@@ -17,6 +17,27 @@
             }
           ],
           "Next": "MergeVideoScenes"
+        },
+        {
+          "And": [
+            {
+              "Variable": "$.action",
+              "IsPresent": true
+            },
+            {
+              "Or": [
+                {
+                  "Variable": "$.action",
+                  "StringEquals": "apply_post_production"
+                },
+                {
+                  "Variable": "$.action",
+                  "StringEquals": "rerender_post_production"
+                }
+              ]
+            }
+          ],
+          "Next": "TriggerPostProduction"
         }
       ],
       "Default": "GenerateLLMPrompt"
@@ -279,12 +300,38 @@
       "Type": "Choice",
       "Choices": [
         {
-          "Variable": "$.llm_response.post_production",
-          "IsPresent": true,
-          "Next": "TriggerPostProduction"
+          "And": [
+            {
+              "Variable": "$.post_production_applied",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.post_production_applied",
+              "BooleanEquals": true
+            },
+            {
+              "Variable": "$.llm_response.post_production",
+              "IsPresent": true
+            }
+          ],
+          "Next": "SetPostProdVideoUrl"
         }
       ],
       "Default": "UpdateStatusCompleted"
+    },
+
+    "SetPostProdVideoUrl": {
+      "Type": "Pass",
+      "Parameters": {
+        "jobId.$": "$.jobId",
+        "userEmail.$": "$.userEmail",
+        "userId.$": "$.userId",
+        "llm_response.$": "$.llm_response",
+        "aspect_ratio.$": "$.aspect_ratio",
+        "videoUrl.$": "$.mergeResult.Payload.result_url",
+        "post_production_applied.$": "$.post_production_applied"
+      },
+      "Next": "TriggerPostProduction"
     },
 
     "TriggerPostProduction": {
@@ -297,12 +344,12 @@
           "userEmail.$": "$.userEmail",
           "userId.$": "$.userId",
           "llm_response.$": "$.llm_response",
-          "videoUrl.$": "$.mergeResult.Payload.result_url",
+          "videoUrl.$": "$.videoUrl",
           "aspect_ratio.$": "$.aspect_ratio",
           "taskToken.$": "$$.Task.Token"
         }
       },
-      "ResultPath": "$.mergeResult",
+      "ResultPath": "$.postProductionResult",
       "Retry": [
         {
           "ErrorEquals": ["States.ALL"],
@@ -311,7 +358,31 @@
           "BackoffRate": 2.0
         }
       ],
-      "Next": "UpdateStatusCompleted"
+      "Next": "UpdateStatusPostProductionCompleted"
+    },
+
+    "UpdateStatusPostProductionCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${UserRequestTableName}",
+        "Key": {
+          "uuid": { "S.$": "$.jobId" },
+          "user_email": { "S.$": "$.userEmail" }
+        },
+        "UpdateExpression": "SET #s = :status, result_url = :res, post_production_status = :pps, post_production_applied = :ppa, updated_at = :now",
+        "ExpressionAttributeNames": {
+          "#s": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": { "S": "COMPLETED" },
+          ":res": { "S.$": "$.postProductionResult.Payload.result_url" },
+          ":pps": { "S": "COMPLETED" },
+          ":ppa": { "BOOL": true },
+          ":now": { "S.$": "$.postProductionResult.Payload.completedAt" }
+        }
+      },
+      "End": true
     },
 
     "UpdateStatusCompleted": {
@@ -323,13 +394,15 @@
           "uuid": { "S.$": "$.jobId" },
           "user_email": { "S.$": "$.userEmail" }
         },
-        "UpdateExpression": "SET #s = :status, result_url = :res, updated_at = :now",
+        "UpdateExpression": "SET #s = :status, result_url = :res, clean_video_url = :cv, post_production_status = :pps, updated_at = :now",
         "ExpressionAttributeNames": {
           "#s": "status"
         },
         "ExpressionAttributeValues": {
           ":status": { "S": "COMPLETED" },
           ":res": { "S.$": "$.mergeResult.Payload.result_url" },
+          ":cv": { "S.$": "$.mergeResult.Payload.result_url" },
+          ":pps": { "S": "NOT_APPLIED" },
           ":now": { "S.$": "$.mergeResult.Payload.completedAt" }
         }
       },

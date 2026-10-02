@@ -33,6 +33,11 @@ RemotionServeUrl="https://remotionlambda-apsoutheast1-ogp034gdv6.s3.ap-southeast
 RemotionMotionGraphicsFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
 RemotionMotionGraphicsServeUrl="https://remotionlambda-apsoutheast1-ogp034gdv6.s3.ap-southeast-1.amazonaws.com/sites/motion-graphics-site/index.html" \
 CloudFrontMediaDomain="https://d2jnn6spj1kyao.cloudfront.net" \
+AutoMotionRunpodUrl="https://api.runpod.ai/v2/rj4azfh8fxvyud" \
+RemotionAutoMotionFunctionName="remotion-render-4-0-504-mem5120mb-disk5120mb-900sec" \
+RemotionAutoMotionServeUrl="https://remotionlambda-apsoutheast1-ogp034gdv6.s3.ap-southeast-1.amazonaws.com/sites/auto-motion-site/index.html" \
+AutoMotionFfmpegLayerArn="arn:aws:lambda:ap-southeast-1:084375570459:layer:automotion-ffmpeg-layer:1" \
+AutoMotionDirectorModel="gemini-3.7-flash" \
 """
 
 [sandbox.deploy.parameters]
@@ -67,6 +72,9 @@ RemotionAwsRegion="ap-southeast-1" \
 RemotionMotionGraphicsFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
 RemotionMotionGraphicsServeUrl="https://remotionlambda-xxx.s3.ap-southeast-1.amazonaws.com/sites/motion-graphics-site/index.html" \
 CloudFrontMediaDomain="https://d2jnn6spj1kyao.cloudfront.net" \
+AutoMotionRunpodUrl="https://api.runpod.ai/v2/YOUR_RUNPOD_ENDPOINT_ID" \
+RemotionAutoMotionFunctionName="remotion-render-4-0-504-mem3008mb-disk3072mb-900sec" \
+RemotionAutoMotionServeUrl="https://remotionlambda-xxx.s3.ap-southeast-1.amazonaws.com/sites/auto-motion-site/index.html" \
 """
 
 [production.deploy.parameters]
@@ -106,4 +114,9 @@ RemotionServeUrl="https://remotionlambda-apsoutheast1-v6x49j2vt5.s3.ap-southeast
 RemotionMotionGraphicsFunctionName="remotion-render-4-0-504-mem2048mb-disk2048mb-900sec" \
 RemotionMotionGraphicsServeUrl="https://remotionlambda-apsoutheast1-v6x49j2vt5.s3.ap-southeast-1.amazonaws.com/sites/motion-graphics-site/index.html" \
 CloudFrontMediaDomain="https://d2hkfwmbvbfxu4.cloudfront.net" \
+AutoMotionRunpodUrl="https://api.runpod.ai/v2/rj4azfh8fxvyud" \
+RemotionAutoMotionFunctionName="remotion-render-4-0-504-mem5120mb-disk5120mb-900sec" \
+RemotionAutoMotionServeUrl="https://remotionlambda-apsoutheast1-v6x49j2vt5.s3.ap-southeast-1.amazonaws.com/sites/auto-motion-site/index.html" \
+AutoMotionFfmpegLayerArn="arn:aws:lambda:ap-southeast-1:020576990105:layer:automotion-ffmpeg-layer:1" \
+AutoMotionDirectorModel="gemini-3.7-flash" \
 """

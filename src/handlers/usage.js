@@ -54,6 +54,13 @@ exports.handleGetUsage = async (event) => {
       } catch (e) {}
     }
 
+    // Resolve clean_video_url if exists
+    if (row.clean_video_url) {
+      try {
+        row.clean_video_url = await resolveMediaUrl(row.clean_video_url, 3600);
+      } catch (e) {}
+    }
+
     // Resolve generated_image as thumbnail_url
     if (row.generated_image) {
       try {

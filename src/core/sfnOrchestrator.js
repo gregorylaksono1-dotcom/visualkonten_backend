@@ -104,7 +104,8 @@ async function triggerRerenderStateMachine({
   llmResponse,
   videoSceneResults,
   requestType,
-  aspectRatio
+  aspectRatio,
+  post_production_applied
 }) {
   if (!STATE_MACHINE_ARN) {
     throw new Error("STATE_MACHINE_ARN environment variable is not set.");
@@ -120,10 +121,11 @@ async function triggerRerenderStateMachine({
     request_type: requestType,
     aspect_ratio: aspectRatio || "9:16",
     audio: null,
-    audio_duration: null
+    audio_duration: null,
+    post_production_applied: Boolean(post_production_applied)
   };
 
-  console.log(`[SFN Orchestrator] Starting Rerender Voiceover Step Function for Job ${jobId}`);
+  console.log(`[SFN Orchestrator] Starting Rerender Voiceover Step Function for Job ${jobId}, post_production_applied: ${Boolean(post_production_applied)}`);
   const sfnResult = await sfnClient.send(new StartExecutionCommand({
     stateMachineArn: STATE_MACHINE_ARN,
     name: `rerender-${jobId}-${Date.now()}`,
@@ -143,6 +145,53 @@ async function triggerRerenderStateMachine({
   }));
 
   console.log(`[SFN Orchestrator] Successfully triggered Rerender Voiceover Step Function. ARN: ${sfnResult.executionArn}`);
+  return sfnResult.executionArn;
+}
+
+async function triggerPostProductionStateMachine({
+  jobId,
+  userEmail,
+  userId,
+  llmResponse,
+  videoUrl,
+  aspectRatio
+}) {
+  if (!STATE_MACHINE_ARN) {
+    throw new Error("STATE_MACHINE_ARN environment variable is not set.");
+  }
+
+  const executionInput = {
+    action: "rerender_post_production",
+    jobId,
+    userEmail,
+    userId: userId || "anonymous",
+    llm_response: llmResponse,
+    videoUrl,
+    aspect_ratio: aspectRatio || "9:16",
+    post_production_applied: true
+  };
+
+  console.log(`[SFN Orchestrator] Starting Post-Production Step Function for Job ${jobId}`);
+  const sfnResult = await sfnClient.send(new StartExecutionCommand({
+    stateMachineArn: STATE_MACHINE_ARN,
+    name: `postprod-${jobId}-${Date.now()}`,
+    input: JSON.stringify(executionInput)
+  }));
+
+  await dynamo.send(new UpdateCommand({
+    TableName: USER_REQUEST_TABLE,
+    Key: { uuid: jobId, user_email: userEmail },
+    UpdateExpression: "SET #s = :status, post_production_status = :pps, sfn_execution_arn = :arn, updated_at = :now",
+    ExpressionAttributeNames: { "#s": "status" },
+    ExpressionAttributeValues: {
+      ":status": "PROCESSING",
+      ":pps": "PROCESSING",
+      ":arn": sfnResult.executionArn,
+      ":now": getJakartaISOString()
+    }
+  }));
+
+  console.log(`[SFN Orchestrator] Successfully triggered Post-Production Step Function. ARN: ${sfnResult.executionArn}`);
   return sfnResult.executionArn;
 }
 
@@ -374,6 +423,7 @@ async function prepareJobData(payload) {
     request_type: requestType,
     llm_response: llmResponse,
     pricing_post_production: pricingPostProduction,
+    post_production_applied: false,
     preview: payload.data.preview || false
   };
 }
@@ -578,11 +628,15 @@ async function submitSceneVideo(payload) {
  * Helper to ensure static FFmpeg.
  */
 async function ensureFfmpegBinary() {
+  const layerFfmpegPath = "/opt/bin/ffmpeg";
+  if (fs.existsSync(layerFfmpegPath)) {
+    return layerFfmpegPath;
+  }
   const localFfmpegPath = "/tmp/ffmpeg";
   if (fs.existsSync(localFfmpegPath)) {
     return localFfmpegPath;
   }
-  console.log(`[FFmpeg] FFmpeg binary not found in /tmp. Downloading from user S3 bucket...`);
+  console.log(`[FFmpeg] FFmpeg binary not found in /opt/bin or /tmp. Downloading from user S3 bucket...`);
   const url = "https://gambr-public.s3.ap-southeast-1.amazonaws.com/library/ffmpeg-linux-x64";
   let resp = await fetch(url);
   if (!resp.ok) {
@@ -718,10 +772,13 @@ async function mergeVideoScenes(payload) {
     let hasTopLevelVoiceover = false;
 
     if (llm_response) {
-      if (llm_response.voiceover_script && (llm_response.voiceover_script.tts_script || llm_response.voiceover_script.script)) {
+      if (llm_response.voiceover_script && typeof llm_response.voiceover_script === "object" && (llm_response.voiceover_script.tts_script || llm_response.voiceover_script.script)) {
         hasTopLevelVoiceover = true;
         ttsScript = llm_response.voiceover_script.tts_script || llm_response.voiceover_script.script;
-      } else if (!isUgcMode) {
+      } else if (typeof llm_response.voiceover_script === "string" && llm_response.voiceover_script.trim()) {
+        hasTopLevelVoiceover = true;
+        ttsScript = llm_response.voiceover_script;
+      } else if (llm_response.tts_script) {
         ttsScript = llm_response.tts_script;
       }
     }
@@ -797,7 +854,7 @@ async function mergeVideoScenes(payload) {
       try { fs.unlinkSync(localAudioPath); } catch { }
     }
 
-    const s3Key = `generated_videos/${userId || "anonymous"}/${jobId}.mp4`;
+    const s3Key = `generated_videos/${userId || "anonymous"}/${jobId}_${Date.now()}.mp4`;
     console.log(`[SFN Orchestrator Merge] Uploading to S3: ${s3Key}`);
     await s3Client.send(new PutObjectCommand({
       Bucket: S3_RESOURCE_BUCKET,
@@ -817,19 +874,21 @@ async function mergeVideoScenes(payload) {
     try { fs.unlinkSync(listPath); } catch { }
     try { fs.unlinkSync(outputPath); } catch { }
 
-    // Update DynamoDB to include the scenes metadata
+    // Update DynamoDB to include the scenes metadata and clean_video_url
     await dynamo.send(new UpdateCommand({
       TableName: USER_REQUEST_TABLE,
       Key: { uuid: jobId, user_email: userEmail },
-      UpdateExpression: "SET video_scenes = :vs, updated_at = :now",
+      UpdateExpression: "SET video_scenes = :vs, clean_video_url = :cv, updated_at = :now",
       ExpressionAttributeValues: {
         ":vs": videoScenes,
+        ":cv": s3Key,
         ":now": getJakartaISOString()
       }
     }));
 
     return {
       result_url: s3Key,
+      clean_video_url: s3Key,
       completedAt: getJakartaISOString(),
       videoGenerationDuration
     };
@@ -940,6 +999,7 @@ async function updateStatusPreview(payload) {
 module.exports = {
   triggerStateMachine,
   triggerRerenderStateMachine,
+  triggerPostProductionStateMachine,
   triggerManualRedrive,
   prepareJobData,
   submitLockImage,

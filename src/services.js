@@ -882,7 +882,101 @@ const invokeMotionGraphicsStateMachine = async (jobId, payload) => {
 
   return response;
 };
+
+const invokeAutoMotionStateMachine = async (jobId, payload) => {
+  const stateMachineArn = process.env.AUTO_MOTION_STATE_MACHINE_ARN;
+  if (!stateMachineArn) {
+    throw new Error("AUTO_MOTION_STATE_MACHINE_ARN is not configured.");
+  }
+
+  let rawVideoS3Uri = null;
+  const bucket = process.env.S3_RESOURCE_BUCKET || "dapurartisan";
+  if (payload.video_ref_key) {
+    rawVideoS3Uri = `s3://${bucket}/${payload.video_ref_key}`;
+  } else if (Array.isArray(payload.s3_keys) && payload.s3_keys.length > 0) {
+    const videoKey = payload.s3_keys.find(k => k.endsWith('.mp4') || k.endsWith('.mov') || k.includes('video')) || payload.s3_keys[0];
+    rawVideoS3Uri = `s3://${bucket}/${videoKey}`;
+  } else if (payload.rawVideoS3Uri) {
+    rawVideoS3Uri = payload.rawVideoS3Uri;
+  }
+
+  const pricingKey = payload.pricing_key || payload.pricingKey || 
+    (payload.templateId === "editorial-glow-v1" ? "EDITORIAL_GLOW_AUTO_MOTION" : 
+    (payload.templateId === "canvas-explain-v1" ? "CANVAS_EXPLAIN_AUTO_MOTION" : 
+    (payload.templateId === "kinetic-v1" ? "KINETIC_AUTO_MOTION" : null)));
+
+  const resolvedTemplateId = payload.templateId || (pricingKey === "EDITORIAL_GLOW_AUTO_MOTION" ? "editorial-glow-v1" : (pricingKey === "CANVAS_EXPLAIN_AUTO_MOTION" ? "canvas-explain-v1" : "kinetic-v1"));
+  const isKinetic = resolvedTemplateId === "kinetic-v1";
+  const resolvedUseCutout = isKinetic ? (payload.useCutout !== undefined ? payload.useCutout : true) : false;
+
+  const executionPayload = {
+    videoId: jobId,
+    jobId,
+    userEmail: payload.userEmail,
+    userId: payload.userId,
+    rawVideoS3Uri,
+    pricingKey: pricingKey || undefined,
+    pricing_key: pricingKey || undefined,
+    pricingPrompt: payload.pricing_prompt || payload.pricingPrompt || undefined,
+    templateId: resolvedTemplateId,
+    framing: payload.framing || "safe",
+    brand: payload.brand || "",
+    useCutout: resolvedUseCutout,
+    prompt: payload.prompt || payload.pricing_prompt || ""
+  };
+
+  try {
+    const command = new StartExecutionCommand({
+      stateMachineArn,
+      name: `AM-${jobId}-${Date.now()}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80),
+      input: JSON.stringify(executionPayload)
+    });
+
+    const response = await sfnClient.send(command);
+    console.log(`[AutoMotion] Started Step Function execution for job ${jobId}: ${response.executionArn}`);
+
+    try {
+      await docClient.send(new UpdateCommand({
+        TableName: process.env.USER_REQUEST_TABLE_NAME,
+        Key: { uuid: jobId, user_email: payload.userEmail },
+        UpdateExpression: "SET sfn_execution_arn = :arn, #s = :status, updated_at = :now, template_id = :tid, pricing_key = :pkey",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: {
+          ":arn": response.executionArn,
+          ":status": "PROCESSING",
+          ":now": getJakartaISOString(),
+          ":tid": payload.templateId || (pricingKey === "EDITORIAL_GLOW_AUTO_MOTION" ? "editorial-glow-v1" : (pricingKey === "CANVAS_EXPLAIN_AUTO_MOTION" ? "canvas-explain-v1" : "kinetic-v1")),
+          ":pkey": pricingKey || (payload.templateId === "editorial-glow-v1" ? "EDITORIAL_GLOW_AUTO_MOTION" : (payload.templateId === "canvas-explain-v1" ? "CANVAS_EXPLAIN_AUTO_MOTION" : "KINETIC_AUTO_MOTION"))
+        }
+      }));
+    } catch (dbErr) {
+      console.error("[AutoMotion] Failed to update sfn_execution_arn in DynamoDB", dbErr);
+    }
+
+    try {
+      const { sendTelegramMessage } = require("./lib/telegram");
+      const templateIdentifier = payload.templateId || pricingKey || "kinetic-v1";
+      await sendTelegramMessage(`${payload.userEmail} melakukan generasi auto motion ${templateIdentifier}`, { force: true });
+    } catch (teleErr) {
+      console.error("[AutoMotion Telegram alert failed]", teleErr.message);
+    }
+
+    return response;
+  } catch (err) {
+    console.error(`[AutoMotion] Failed to start execution for job ${jobId}:`, err);
+    try {
+      const { sendTelegramMessage } = require("./lib/telegram");
+      const templateIdentifier = payload.templateId || pricingKey || "kinetic-v1";
+      await sendTelegramMessage(`❌ [AUTO_MOTION ERROR] ${payload.userEmail} gagal melakukan generasi auto motion ${templateIdentifier}\n🆔 ID: ${jobId}\n⚠️ Error: ${err.message}`, { force: true });
+    } catch (teleErr) {
+      console.error("[AutoMotion Telegram error alert failed]", teleErr.message);
+    }
+    throw err;
+  }
+};
+
 module.exports = {
+  invokeAutoMotionStateMachine,
   invokeMotionGraphicsStateMachine,
   docClient,
   s3Client,

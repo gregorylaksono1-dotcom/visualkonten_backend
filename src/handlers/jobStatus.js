@@ -57,8 +57,12 @@ exports.handleBatchStatus = async (event) => {
                 preview: item.preview ?? null,
                 aspect_ratio: item.aspect_ratio ?? null,
                 generated_scenes: item.generated_scenes ?? null,
-                error_message: item.error_message ?? null,
-                duration_seconds: item.duration_seconds ?? null,
+                error_message: item.error_message || item.error || null,
+                error: item.error_message || item.error || null,
+                pricing_key: item.pricing_key || null,
+                pricing_type: item.pricing_type || null,
+                template_id: item.template_id || null,
+                duration_seconds: item.duration_seconds ?? item.video_duration ?? null,
                 story_type: item.story_type ?? null,
                 language: item.language ?? null,
                 preview_duration: item.preview_duration ?? null,
@@ -97,6 +101,14 @@ exports.handleBatchStatus = async (event) => {
                     out.result_url = await resolveMediaUrl(item.result_url, 3600);
                 } catch (e) {
                     console.error(`Error resolving result for ${item.uuid}`, e);
+                }
+            }
+
+            if (item.clean_video_url) {
+                try {
+                    out.clean_video_url = await resolveMediaUrl(item.clean_video_url, 3600);
+                } catch (e) {
+                    console.error(`Error resolving clean_video_url for ${item.uuid}`, e);
                 }
             }
 

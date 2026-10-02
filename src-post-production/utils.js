@@ -109,8 +109,16 @@ const parseCreditsFromPricingItem = (item) => {
       parsedAttr = typeof item.attr === "string" ? JSON.parse(item.attr) : item.attr;
     } catch (e) { }
     if (parsedAttr && parsedAttr["720"] !== undefined) {
-      raw = parsedAttr["720"];
+      const v = parsedAttr["720"];
+      raw = typeof v === 'object' && v !== null ? (v.price || 0) : v;
+    } else if (parsedAttr && (parsedAttr["30"] !== undefined || parsedAttr["60"] !== undefined)) {
+      const v = parsedAttr["30"] ?? parsedAttr["60"];
+      raw = typeof v === 'object' && v !== null ? (v.price || 0) : v;
     }
+  }
+
+  if (raw && typeof raw === 'object') {
+    raw = raw.price ?? raw.amount ?? raw.credits ?? NaN;
   }
 
   if (raw === undefined || raw === null || raw === "") return NaN;
